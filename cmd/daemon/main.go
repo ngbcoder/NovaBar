@@ -11,6 +11,8 @@ import (
 
 	"github.com/novabar-shell/novabar/internal/bar"
 	"github.com/novabar-shell/novabar/internal/config"
+	"github.com/novabar-shell/novabar/internal/launcher"
+	"github.com/novabar-shell/novabar/internal/media"
 	"github.com/novabar-shell/novabar/internal/onboarding"
 	"github.com/novabar-shell/novabar/internal/rpc"
 	"github.com/novabar-shell/novabar/internal/tiling"
@@ -72,8 +74,10 @@ func Run() {
 	}
 	defer cleanup()
 
-	// Initialize virtual workspace manager
+	// Initialize virtual workspace manager, launcher indexer, and media controller
 	wsMgr := workspace.NewManager()
+	appIndexer := launcher.NewIndexer()
+	mediaCtrl := media.NewController()
 
 	// Initialize loopback JSON-RPC server for widgets and SDK
 	rpcServer := rpc.NewServer(9876)
@@ -89,6 +93,31 @@ func Run() {
 	})
 	rpcServer.RegisterMethod("workspace.get", func(params json.RawMessage) (interface{}, error) {
 		return map[string]interface{}{"active": wsMgr.GetActiveID()}, nil
+	})
+	rpcServer.RegisterMethod("launcher.search", func(params json.RawMessage) (interface{}, error) {
+		var p struct {
+			Query string `json:"query"`
+			Limit int    `json:"limit"`
+		}
+		_ = json.Unmarshal(params, &p)
+		if p.Limit <= 0 {
+			p.Limit = 10
+		}
+		results := appIndexer.Search(p.Query, p.Limit)
+		return results, nil
+	})
+	rpcServer.RegisterMethod("launcher.launch", func(params json.RawMessage) (interface{}, error) {
+		var p struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		err := launcher.Launch(p.Path)
+		return map[string]interface{}{"success": err == nil}, err
+	})
+	rpcServer.RegisterMethod("media.get", func(params json.RawMessage) (interface{}, error) {
+		return mediaCtrl.GetCurrentSession(), nil
 	})
 	_ = rpcServer.Start()
 
