@@ -47,7 +47,28 @@ var (
 	procEnumDisplayMonitors = modUser32.NewProc("EnumDisplayMonitors")
 	procGetMonitorInfoW     = modUser32.NewProc("GetMonitorInfoW")
 	procMonitorFromWindow   = modUser32.NewProc("MonitorFromWindow")
+
+	// Window class and creation procedures
+	procRegisterClassExW = modUser32.NewProc("RegisterClassExW")
+	procCreateWindowExW  = modUser32.NewProc("CreateWindowExW")
+	procDefWindowProcW   = modUser32.NewProc("DefWindowProcW")
+	procDestroyWindow    = modUser32.NewProc("DestroyWindow")
 )
+
+type WNDCLASSEX struct {
+	CbSize        uint32
+	Style         uint32
+	LpfnWndProc   uintptr
+	CbClsExtra    int32
+	CbWndExtra    int32
+	HInstance     windows.Handle
+	HIcon         windows.Handle
+	HCursor       windows.Handle
+	HbrBackground windows.Handle
+	LpszMenuName  *uint16
+	LpszClassName *uint16
+	HIconSm       windows.Handle
+}
 
 type MONITORINFO struct {
 	CbSize    uint32
@@ -86,6 +107,7 @@ const (
 const (
 	GWL_STYLE     = -16
 	GWL_EXSTYLE   = -20
+	WS_POPUP      = 0x80000000
 	WS_VISIBLE    = 0x10000000
 	WS_EX_TOOLWINDOW = 0x00000080
 	WS_EX_APPWINDOW  = 0x00040000
@@ -405,5 +427,45 @@ func DeferWindowPos(hWinPosInfo uintptr, hwnd windows.HWND, hWndInsertAfter uint
 
 func EndDeferWindowPos(hWinPosInfo uintptr) bool {
 	r1, _, _ := procEndDeferWindowPos.Call(hWinPosInfo)
+	return r1 != 0
+}
+
+func RegisterClassEx(wcx *WNDCLASSEX) (uint16, error) {
+	wcx.CbSize = uint32(unsafe.Sizeof(*wcx))
+	r1, _, err := procRegisterClassExW.Call(uintptr(unsafe.Pointer(wcx)))
+	if r1 == 0 {
+		return 0, err
+	}
+	return uint16(r1), nil
+}
+
+func CreateWindowEx(dwExStyle uint32, lpClassName, lpWindowName *uint16, dwStyle uint32, x, y, nWidth, nHeight int32, hWndParent windows.HWND, hMenu windows.Handle, hInstance windows.Handle, lpParam unsafe.Pointer) (windows.HWND, error) {
+	r1, _, err := procCreateWindowExW.Call(
+		uintptr(dwExStyle),
+		uintptr(unsafe.Pointer(lpClassName)),
+		uintptr(unsafe.Pointer(lpWindowName)),
+		uintptr(dwStyle),
+		uintptr(x),
+		uintptr(y),
+		uintptr(nWidth),
+		uintptr(nHeight),
+		uintptr(hWndParent),
+		uintptr(hMenu),
+		uintptr(hInstance),
+		uintptr(lpParam),
+	)
+	if r1 == 0 {
+		return 0, err
+	}
+	return windows.HWND(r1), nil
+}
+
+func DefWindowProc(hwnd windows.HWND, msg uint32, wParam, lParam uintptr) uintptr {
+	r1, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(msg), wParam, lParam)
+	return r1
+}
+
+func DestroyWindow(hwnd windows.HWND) bool {
+	r1, _, _ := procDestroyWindow.Call(uintptr(hwnd))
 	return r1 != 0
 }

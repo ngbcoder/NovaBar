@@ -8,11 +8,13 @@ import (
 	"runtime"
 	"syscall"
 
+	"github.com/novabar-shell/novabar/internal/bar"
 	"github.com/novabar-shell/novabar/internal/config"
 	"github.com/novabar-shell/novabar/internal/onboarding"
 	"github.com/novabar-shell/novabar/internal/tiling"
 	"github.com/novabar-shell/novabar/internal/tracker"
 	"github.com/novabar-shell/novabar/internal/win"
+	"github.com/novabar-shell/novabar/internal/workspace"
 	"golang.org/x/sys/windows"
 )
 
@@ -44,13 +46,33 @@ func Run() {
 		}
 	}
 
-	// Always restore taskbars when daemon exits or encounters an interrupt
+	// Register AppBar if enabled
+	var appbar *bar.AppBarManager
+	if cfg.Bar.Enabled {
+		edge := uint32(win.ABE_TOP)
+		if cfg.Bar.Position == "bottom" {
+			edge = uint32(win.ABE_BOTTOM)
+		}
+		appbar = bar.NewAppBarManager(edge, int32(cfg.Bar.Height))
+		if err := appbar.CreateAndRegister(); err != nil {
+			log.Printf("[NovaBar+] Warning: failed to register AppBar: %v\n", err)
+		}
+	}
+
+	// Always restore taskbars and unregister AppBar when daemon exits
 	cleanup := func() {
 		log.Println("[NovaBar+] Restoring native taskbars and exiting cleanly...")
+		if appbar != nil {
+			appbar.Unregister()
+		}
 		_ = taskbars.Show()
 		win.ForceRestoreTaskbar()
 	}
 	defer cleanup()
+
+	// Initialize virtual workspace manager
+	wsMgr := workspace.NewManager()
+	_ = wsMgr
 
 	// Handle standard graceful exit signals
 	sigChan := make(chan os.Signal, 1)
