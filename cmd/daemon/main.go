@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"fmt"
@@ -15,7 +15,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func main() {
+// Run starts the core NovaBar+ daemon and message loop.
+func Run() {
 	// Pin message pump goroutine to dedicated OS thread
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
