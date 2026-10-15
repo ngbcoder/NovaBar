@@ -109,6 +109,7 @@ const (
 	GWL_EXSTYLE   = -20
 	WS_POPUP      = 0x80000000
 	WS_VISIBLE    = 0x10000000
+	WS_EX_TOPMOST    = 0x00000008
 	WS_EX_TOOLWINDOW = 0x00000080
 	WS_EX_APPWINDOW  = 0x00040000
 	WS_EX_NOACTIVATE = 0x08000000
@@ -468,4 +469,9 @@ func DefWindowProc(hwnd windows.HWND, msg uint32, wParam, lParam uintptr) uintpt
 func DestroyWindow(hwnd windows.HWND) bool {
 	r1, _, _ := procDestroyWindow.Call(uintptr(hwnd))
 	return r1 != 0
+}
+
+func GetSystemMetrics(nIndex int32) int32 {
+	r1, _, _ := procGetSystemMetrics.Call(uintptr(nIndex))
+	return int32(r1)
 }

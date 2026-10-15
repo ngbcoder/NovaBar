@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"unsafe"
 
 	"github.com/novabar-shell/novabar/internal/win"
 	"golang.org/x/sys/windows"
@@ -45,6 +46,11 @@ func (ab *AppBarManager) CreateAndRegister() error {
 	classNamePtr, _ := windows.UTF16PtrFromString(AppBarClassName)
 	titlePtr, _ := windows.UTF16PtrFromString("NovaBar+ AppBar")
 
+	modGdi32 := windows.NewLazySystemDLL("gdi32.dll")
+	procCreateSolidBrush := modGdi32.NewProc("CreateSolidBrush")
+	// Dark background RGB(20, 22, 26) = 0x001A1614
+	hBrush, _, _ := procCreateSolidBrush.Call(0x001A1614)
+
 	// Register window class
 	wcx := win.WNDCLASSEX{
 		LpfnWndProc: windows.NewCallback(func(hwnd windows.HWND, msg uint32, wParam, lParam uintptr) uintptr {
@@ -55,13 +61,14 @@ func (ab *AppBarManager) CreateAndRegister() error {
 			}
 			return win.DefWindowProc(hwnd, msg, wParam, lParam)
 		}),
+		HbrBackground: windows.Handle(hBrush),
 		LpszClassName: classNamePtr,
 	}
 
 	_, _ = win.RegisterClassEx(&wcx)
 
 	// Create borderless topmost layered window
-	exStyle := uint32(win.WS_EX_TOOLWINDOW | win.WS_EX_NOACTIVATE | win.WS_EX_APPWINDOW)
+	exStyle := uint32(win.WS_EX_TOOLWINDOW | win.WS_EX_TOPMOST)
 	style := uint32(win.WS_POPUP | win.WS_VISIBLE)
 
 	hwnd, err := win.CreateWindowEx(
@@ -69,7 +76,7 @@ func (ab *AppBarManager) CreateAndRegister() error {
 		classNamePtr,
 		titlePtr,
 		style,
-		0, 0, 0, 0,
+		0, 0, 1920, ab.height,
 		0, 0, 0, nil,
 	)
 	if err != nil || hwnd == 0 {
@@ -79,7 +86,7 @@ func (ab *AppBarManager) CreateAndRegister() error {
 
 	// Register AppBar with Windows
 	var abd win.APPBARDATA
-	abd.CbSize = uint32(win.RECT{}.Height()) // size of APPBARDATA
+	abd.CbSize = uint32(unsafe.Sizeof(abd))
 	abd.HWnd = ab.hwnd
 	abd.UCallbackMessage = WM_APPBAR_NOTIFY
 
@@ -89,6 +96,7 @@ func (ab *AppBarManager) CreateAndRegister() error {
 	// Position and reserve screen work area
 	ab.UpdatePosition()
 
+	win.ShowWindow(ab.hwnd, win.SW_SHOW)
 	log.Printf("[NovaBar+ AppBar] Registered AppBar successfully (HWND: %v)\n", ab.hwnd)
 	return nil
 }
@@ -99,8 +107,17 @@ func (ab *AppBarManager) UpdatePosition() {
 		return
 	}
 
-	screenW := int32(1920) // Default fallback
+	screenW := win.GetSystemMetrics(0) // SM_CXSCREEN
+	screenH := win.GetSystemMetrics(1) // SM_CYSCREEN
+	if screenW <= 0 {
+		screenW = 1920
+	}
+	if screenH <= 0 {
+		screenH = 1080
+	}
+
 	var abd win.APPBARDATA
+	abd.CbSize = uint32(unsafe.Sizeof(abd))
 	abd.HWnd = ab.hwnd
 	abd.UEdge = ab.edge
 
@@ -110,8 +127,8 @@ func (ab *AppBarManager) UpdatePosition() {
 		abd.Rc.Top = 0
 		abd.Rc.Bottom = ab.height
 	} else {
-		abd.Rc.Top = 1080 - ab.height
-		abd.Rc.Bottom = 1080
+		abd.Rc.Top = screenH - ab.height
+		abd.Rc.Bottom = screenH
 	}
 
 	// Request work area reduction from Windows shell
