@@ -1,0 +1,16 @@
+{
+  "id": "io.novabar.defaultbar",
+  "name": "NovaBar Default Bar",
+  "version": "1.0.0",
+  "entry": "index.html",
+  "permissions": [
+    "windows.read",
+    "workspaces.manage",
+    "system.clock"
+  ],
+  "window": {
+    "kind": "bar",
+    "transparent": true,
+    "height": 40
+  }
+}

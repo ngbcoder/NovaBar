@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>NovaBar</title>
+  <style>
+    :root {
+      --bg: rgba(18, 20, 24, 0.85);
+      --accent: #3b82f6;
+      --text: #f3f4f6;
+      --dim: #9ca3af;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: var(--bg);
+      backdrop-filter: blur(16px);
+      color: var(--text);
+      font-family: 'Segoe UI Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 40px;
+      padding: 0 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .left, .center, .right { display: flex; align-items: center; gap: 8px; }
+    .brand { font-weight: 700; color: var(--accent); letter-spacing: 0.5px; }
+    .workspace-btn {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--dim);
+      border-radius: 6px;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.15s ease;
+    }
+    .workspace-btn.active {
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+    }
+    .clock { font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="left">
+    <div class="brand">NovaBar+</div>
+    <div id="workspaces">
+      <button class="workspace-btn active">1</button>
+      <button class="workspace-btn">2</button>
+      <button class="workspace-btn">3</button>
+      <button class="workspace-btn">4</button>
+    </div>
+  </div>
+  <div class="center" id="window-title">
+    <span>Ready</span>
+  </div>
+  <div class="right">
+    <div class="clock" id="clock">00:00:00</div>
+  </div>
+
+  <script>
+    function updateClock() {
+      const now = new Date();
+      document.getElementById('clock').textContent = now.toLocaleTimeString();
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+  </script>
+</body>
+</html>

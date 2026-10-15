@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/novabar-shell/novabar/internal/bar"
 	"github.com/novabar-shell/novabar/internal/config"
 	"github.com/novabar-shell/novabar/internal/onboarding"
+	"github.com/novabar-shell/novabar/internal/rpc"
 	"github.com/novabar-shell/novabar/internal/tiling"
 	"github.com/novabar-shell/novabar/internal/tracker"
 	"github.com/novabar-shell/novabar/internal/win"
@@ -72,7 +74,23 @@ func Run() {
 
 	// Initialize virtual workspace manager
 	wsMgr := workspace.NewManager()
-	_ = wsMgr
+
+	// Initialize loopback JSON-RPC server for widgets and SDK
+	rpcServer := rpc.NewServer(9876)
+	rpcServer.RegisterMethod("workspace.switch", func(params json.RawMessage) (interface{}, error) {
+		var p struct {
+			ID int `json:"id"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		wsMgr.Switch(p.ID)
+		return map[string]interface{}{"active": p.ID}, nil
+	})
+	rpcServer.RegisterMethod("workspace.get", func(params json.RawMessage) (interface{}, error) {
+		return map[string]interface{}{"active": wsMgr.GetActiveID()}, nil
+	})
+	_ = rpcServer.Start()
 
 	// Handle standard graceful exit signals
 	sigChan := make(chan os.Signal, 1)
