@@ -42,6 +42,24 @@ var (
 
 	// Shell32 procedures
 	procSHAppBarMessage = modShell32.NewProc("SHAppBarMessage")
+
+	// Monitor procedures
+	procEnumDisplayMonitors = modUser32.NewProc("EnumDisplayMonitors")
+	procGetMonitorInfoW     = modUser32.NewProc("GetMonitorInfoW")
+	procMonitorFromWindow   = modUser32.NewProc("MonitorFromWindow")
+)
+
+type MONITORINFO struct {
+	CbSize    uint32
+	RcMonitor RECT
+	RcWork    RECT
+	DwFlags   uint32
+}
+
+const (
+	MONITOR_DEFAULTTONULL    = 0x00000000
+	MONITOR_DEFAULTTOPRIMARY = 0x00000001
+	MONITOR_DEFAULTTONEAREST = 0x00000002
 )
 
 // WinEvent constants
@@ -345,4 +363,47 @@ func GetExtendedFrameBounds(hwnd windows.HWND) (RECT, error) {
 func SHAppBarMessage(dwMessage uint32, pData *APPBARDATA) uintptr {
 	r1, _, _ := procSHAppBarMessage.Call(uintptr(dwMessage), uintptr(unsafe.Pointer(pData)))
 	return r1
+}
+
+func EnumDisplayMonitors(hdc uintptr, lprcClip *RECT, lpfnEnum uintptr, dwData uintptr) error {
+	r1, _, err := procEnumDisplayMonitors.Call(hdc, uintptr(unsafe.Pointer(lprcClip)), lpfnEnum, dwData)
+	if r1 == 0 {
+		return err
+	}
+	return nil
+}
+
+func GetMonitorInfo(hMonitor uintptr, lpmi *MONITORINFO) bool {
+	lpmi.CbSize = uint32(unsafe.Sizeof(*lpmi))
+	r1, _, _ := procGetMonitorInfoW.Call(hMonitor, uintptr(unsafe.Pointer(lpmi)))
+	return r1 != 0
+}
+
+func MonitorFromWindow(hwnd windows.HWND, dwFlags uint32) uintptr {
+	r1, _, _ := procMonitorFromWindow.Call(uintptr(hwnd), uintptr(dwFlags))
+	return r1
+}
+
+func BeginDeferWindowPos(nNumWindows int32) uintptr {
+	r1, _, _ := procBeginDeferWindowPos.Call(uintptr(nNumWindows))
+	return r1
+}
+
+func DeferWindowPos(hWinPosInfo uintptr, hwnd windows.HWND, hWndInsertAfter uintptr, x, y, cx, cy int32, uFlags uint32) uintptr {
+	r1, _, _ := procDeferWindowPos.Call(
+		hWinPosInfo,
+		uintptr(hwnd),
+		hWndInsertAfter,
+		uintptr(x),
+		uintptr(y),
+		uintptr(cx),
+		uintptr(cy),
+		uintptr(uFlags),
+	)
+	return r1
+}
+
+func EndDeferWindowPos(hWinPosInfo uintptr) bool {
+	r1, _, _ := procEndDeferWindowPos.Call(hWinPosInfo)
+	return r1 != 0
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/novabar-shell/novabar/internal/config"
 	"github.com/novabar-shell/novabar/internal/onboarding"
+	"github.com/novabar-shell/novabar/internal/tiling"
 	"github.com/novabar-shell/novabar/internal/tracker"
 	"github.com/novabar-shell/novabar/internal/win"
 	"golang.org/x/sys/windows"
@@ -60,10 +61,18 @@ func Run() {
 		win.PostQuitMessage(0)
 	}()
 
-	// Initialize window tracker
+	// Initialize window tracker & tiling engine
 	trk := tracker.NewWindowTracker()
 	trk.Refresh()
 	log.Printf("[NovaBar+] Tracking initialized. Active manageable windows: %d\n", trk.Count())
+
+	engine := tiling.NewEngine(cfg)
+	log.Printf("[NovaBar+] Detected %d monitor(s). Work area: %+v\n", len(engine.GetMonitors()), engine.GetMonitors())
+
+	// Initial tile
+	if cfg.Tiling.Enabled {
+		engine.TileWorkspace(trk.GetWindowHandles())
+	}
 
 	// Register out-of-context WinEventHook
 	hookCb := windows.NewCallback(func(hWinEventHook uintptr, event uint32, hwnd windows.HWND, idObject int32, idChild int32, idEventThread uint32, dwmsEventTime uint32) uintptr {
@@ -77,6 +86,9 @@ func Run() {
 		case win.EVENT_OBJECT_SHOW, win.EVENT_OBJECT_DESTROY:
 			// Reconcile window tracking on new/closed windows
 			trk.Refresh()
+			if cfg.Tiling.Enabled {
+				engine.TileWorkspace(trk.GetWindowHandles())
+			}
 		}
 		return 0
 	})

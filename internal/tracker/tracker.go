@@ -92,3 +92,14 @@ func (t *WindowTracker) Count() int {
 	defer t.mu.RUnlock()
 	return len(t.windows)
 }
+
+// GetWindowHandles returns a list of currently manageable window HWNDs.
+func (t *WindowTracker) GetWindowHandles() []windows.HWND {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	handles := make([]windows.HWND, 0, len(t.windows))
+	for h := range t.windows {
+		handles = append(handles, h)
+	}
+	return handles
+}
