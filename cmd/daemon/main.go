@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/ngbcoder/NovaBar/internal/tiling"
 	"github.com/ngbcoder/NovaBar/internal/tracker"
 	"github.com/ngbcoder/NovaBar/internal/watchdog"
+	"github.com/ngbcoder/NovaBar/internal/webview"
 	"github.com/ngbcoder/NovaBar/internal/win"
 	"github.com/ngbcoder/NovaBar/internal/workspace"
 	"golang.org/x/sys/windows"
@@ -42,14 +44,17 @@ type daemon struct {
 
 	taskbars *win.TaskbarState
 	bars     *bar.Manager
-	trk      *tracker.WindowTracker
-	engine   *tiling.Engine
-	spaces   *workspace.Manager
-	indexer  *launcher.Indexer
-	media    *media.Controller
-	rpcs     *rpc.Server
-	hotkeys  *hotkey.Manager
-	dog      *watchdog.Watchdog
+	surfaces map[string]*webview.Surface // keyed by bar name
+	widgets  string                      // resolved widget root
+
+	trk     *tracker.WindowTracker
+	engine  *tiling.Engine
+	spaces  *workspace.Manager
+	indexer *launcher.Indexer
+	media   *media.Controller
+	rpcs    *rpc.Server
+	hotkeys *hotkey.Manager
+	dog     *watchdog.Watchdog
 
 	// quit is signalled by the signal handler, which hands off to the pump thread.
 	// Win32 requires the quit to originate on the pump thread, so the signal handler
@@ -82,6 +87,7 @@ func Run() {
 	d := &daemon{
 		taskbars: win.NewTaskbarState(),
 		bars:     bar.NewManager(),
+		surfaces: make(map[string]*webview.Surface, 4),
 		trk:      tracker.NewWindowTracker(),
 		spaces:   workspace.NewManager(),
 	}
@@ -201,9 +207,34 @@ func (d *daemon) setup() error {
 	d.rpcs = rpc.NewServer()
 	d.registerRPCMethods()
 	d.rpcs.SetControlHandler(d.handleControl)
+
+	// Serve widget assets from the same listener, before starting it.
+	if root, err := webview.FindWidgetRoot(); err != nil {
+		log.Printf("[NovaBar] No widgets directory: %v\n", err)
+		log.Printf("[NovaBar] Bars will reserve their space but render nothing\n")
+	} else {
+		d.widgets = root
+		d.rpcs.SetAssetHandler(webview.WidgetAssetPrefix, webview.WidgetHandler(root))
+		log.Printf("[NovaBar] Widgets loaded from %s (%v)\n", root, webview.ListWidgets(root))
+	}
+
+	// The SDK is served too, so a widget can import it without a build step. It lives
+	// outside the widget tree because it is shared by every widget.
+	if sdkRoot, err := webview.FindSDKRoot(); err != nil {
+		log.Printf("[NovaBar] Widget SDK not served: %v\n", err)
+	} else {
+		d.rpcs.SetAssetHandler("/sdk", webview.WidgetHandler(sdkRoot))
+	}
+
 	if err := d.rpcs.Start(); err != nil {
 		return fmt.Errorf("could not start IPC server: %w", err)
 	}
+
+	// The bars already exist from the applyBars call above, but the surfaces could not
+	// attach then: the widget root is only resolved after the bars, and a widget needs
+	// the IPC port and session token to bootstrap itself. Attach them now that both
+	// exist.
+	d.syncSurfaces(d.cfg)
 
 	// Initial reconcile: adopt existing windows, put them on workspace 1, tile.
 	d.trk.Refresh()
@@ -258,9 +289,150 @@ func (d *daemon) applyBars(cfg config.Config) {
 	}
 
 	d.warnAboutCollapsedBars()
+	d.syncSurfaces(cfg)
 
 	log.Printf("[NovaBar] %d bar(s) active\n", d.bars.Count())
 }
+
+// syncSurfaces attaches or releases a WebView2 surface for each bar.
+//
+// A surface lives inside the bar's own window, so the bar's work-area reservation and
+// window styles keep applying and WebView2 creates no windows of its own.
+//
+// Must run on the message pump thread: WebView2 requires a single-threaded apartment,
+// and the controller is bound to the thread that created it.
+func (d *daemon) syncSurfaces(cfg config.Config) {
+	if d.widgets == "" {
+		return
+	}
+	if !webview.Available() {
+		log.Printf("[NovaBar] WebView2 runtime unavailable; bars will render nothing\n")
+		return
+	}
+
+	live := make(map[string]bool, len(cfg.Bars))
+
+	for _, bc := range cfg.Bars {
+		if !bc.Enabled {
+			continue
+		}
+
+		edge, ok := bar.EdgeForName(bc.Edge)
+		if !ok {
+			continue
+		}
+		ab := d.bars.Get(edge)
+		if ab == nil || !ab.Registered() {
+			continue
+		}
+
+		name := bc.Name
+		if name == "" {
+			name = EdgeNameFor(edge)
+		}
+		live[name] = true
+
+		existing, has := d.surfaces[name]
+		if has {
+			// Same widget on the same bar: just resize and tell WebView2 the parent
+			// moved, which is what a bar being repositioned requires.
+			existing.Resize(0, 0, int32(bc.Size), int32(bc.Size))
+			existing.NotifyParentMoved()
+			continue
+		}
+
+		surface, err := d.attachSurface(ab, bc, name)
+		if err != nil {
+			log.Printf("[NovaBar] Could not attach a widget to the %s bar: %v\n", name, err)
+			continue
+		}
+		d.surfaces[name] = surface
+	}
+
+	// Release surfaces whose bar is gone.
+	for name, surface := range d.surfaces {
+		if live[name] {
+			continue
+		}
+		surface.Destroy()
+		delete(d.surfaces, name)
+	}
+}
+
+// attachSurface creates a WebView2 surface inside a bar's window and loads its widget.
+func (d *daemon) attachSurface(ab *bar.AppBarManager, bc config.BarConfig, name string) (*webview.Surface, error) {
+	widget := bc.Widget
+	if widget == "" {
+		widget = "bar"
+	}
+
+	permissions, err := d.readManifestPermissions(widget)
+	if err != nil {
+		log.Printf("[NovaBar] Widget %q has no readable manifest: %v\n", widget, err)
+	}
+
+	boot := webview.Bootstrap{
+		Port:        d.rpcs.Port(),
+		Token:       d.rpcs.Token(),
+		Widget:      widget,
+		Permissions: permissions,
+	}
+	js, err := boot.BootstrapJS()
+	if err != nil {
+		return nil, err
+	}
+
+	surface, err := webview.Attach(ab.HWND(), webview.Options{
+		Transparent: bc.Transparent,
+		OnMessage: func(payload string) {
+			d.handleWidgetMessage(name, payload)
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Inject before navigating so the endpoint exists by the time the widget's first
+	// script runs.
+	surface.Init(js)
+
+	url := webview.WidgetURL(d.rpcs.Port(), widget)
+	surface.Navigate(url)
+
+	// Fit the webview to the bar. The bounds are relative to the parent window.
+	surface.Resize(0, 0, int32(bc.Size), int32(bc.Size))
+
+	log.Printf("[NovaBar] %s bar rendering widget %q from %s\n", name, widget, url)
+	return surface, nil
+}
+
+// readManifestPermissions reads a widget manifest's declared permissions.
+//
+// Informational only for now. The manifest is what a widget claims; enforcement belongs
+// on the RPC methods, which is not wired yet, so nothing is trusted from the file.
+func (d *daemon) readManifestPermissions(widget string) ([]string, error) {
+	path := filepath.Join(d.widgets, widget, "manifest.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var manifest struct {
+		Permissions []string `json:"permissions"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, err
+	}
+	return manifest.Permissions, nil
+}
+
+// handleWidgetMessage handles a message posted from a widget page.
+func (d *daemon) handleWidgetMessage(barName, payload string) {
+	log.Printf("[NovaBar] Message from widget on the %s bar: %s", barName, payload)
+}
+
+// EdgeNameFor returns a readable name for an ABE_* edge constant.
+func EdgeNameFor(edge uint32) string { return bar.EdgeName(edge) }
 
 // warnAboutCollapsedBars reports bars that registered but reserved no screen space.
 //
@@ -293,6 +465,10 @@ func (d *daemon) teardown() {
 
 	if d.hotkeys != nil {
 		d.hotkeys.Stop()
+	}
+	for name, surface := range d.surfaces {
+		surface.Destroy()
+		delete(d.surfaces, name)
 	}
 	if d.watcher != nil {
 		d.watcher.Close()

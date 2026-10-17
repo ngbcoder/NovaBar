@@ -367,6 +367,11 @@ func (ab *AppBarManager) Unregister() {
 	ab.registered = false
 	ab.hwnd = 0
 	ab.bounds = win.RECT{}
+
+	// The window is gone but its pixels may not be. Repaint so the user is not left
+	// looking at a bar that has already been removed.
+	win.RefreshDesktop()
+
 	log.Printf("[NovaBar AppBar] Unregistered %s bar and released its reserved work area.\n", ab.name)
 }
 

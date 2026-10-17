@@ -138,6 +138,13 @@ func ForceRestoreTaskbar() {
 	}
 
 	RefreshWorkArea()
+
+	// Finally repaint. Recovery from a force-kill can leave the destroyed bar's pixels
+	// on screen: the window is gone and the work area is correct, but nothing has asked
+	// the compositor to replace that region, so the user is left looking at a bar that
+	// no longer exists.
+	RefreshDesktop()
+
 	log.Println("[NovaBar Taskbar] Force-restored native taskbars.")
 }
 

@@ -157,6 +157,9 @@ type Server struct {
 
 	// controlHandler executes CLI control commands. nil disables the endpoint.
 	controlHandler ControlHandler
+
+	// assets are static trees mounted for the WebView2 surfaces.
+	assets []assetMount
 }
 
 // NewServer creates a Server with an ephemeral loopback port and a fresh auth token.
@@ -231,6 +234,25 @@ func (s *Server) SetControlHandler(handler ControlHandler) {
 	s.controlHandler = handler
 }
 
+// SetAssetHandler mounts a static file server, used to serve widget HTML, CSS and JS to
+// the WebView2 surfaces.
+//
+// Deliberately not behind the session token: the assets are static presentation with no
+// secrets in them, and the token is injected into the page at runtime rather than baked
+// into a file. Keeping assets unauthenticated also means a widget loads even if its
+// token has been rotated between process start and navigation.
+func (s *Server) SetAssetHandler(prefix string, handler http.Handler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.assets = append(s.assets, assetMount{prefix: prefix, handler: handler})
+}
+
+// assetMount is one mounted static file tree.
+type assetMount struct {
+	prefix  string
+	handler http.Handler
+}
+
 // Methods returns the registered method names, sorted.
 func (s *Server) Methods() []string {
 	s.mu.RLock()
@@ -279,6 +301,16 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc(ControlPath, s.handleControl)
+
+	// Static mounts for widget assets and the SDK. Registered individually because the
+	// widget tree and the SDK live in different directories.
+	s.mu.RLock()
+	mounts := append([]assetMount(nil), s.assets...)
+	s.mu.RUnlock()
+	for _, m := range mounts {
+		prefix := strings.TrimSuffix(m.prefix, "/")
+		mux.Handle(prefix+"/", http.StripPrefix(prefix, m.handler))
+	}
 
 	s.mu.Lock()
 	s.token = token
@@ -403,13 +435,20 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	s.clients[client] = true
+	count := len(s.clients)
 	s.mu.Unlock()
+
+	// Log connections: without this there is no way to tell a widget that failed to
+	// load from one that loaded and never connected, which are visually identical.
+	log.Printf("[NovaBar IPC] widget connected (%d total)\n", count)
 
 	defer func() {
 		s.mu.Lock()
 		delete(s.clients, client)
+		remaining := len(s.clients)
 		s.mu.Unlock()
 		_ = conn.Close()
+		log.Printf("[NovaBar IPC] widget disconnected (%d remaining)\n", remaining)
 	}()
 
 	for {
@@ -508,6 +547,10 @@ func (s *Server) handleSubscribe(client *Client, msg []byte) {
 		ID:      raw.ID,
 		Result:  map[string]any{"topics": accepted},
 	})
+
+	if len(accepted) > 0 {
+		log.Printf("[NovaBar IPC] widget subscribed to %v\n", accepted)
+	}
 }
 
 // IPCDescriptorPath returns where the discovery descriptor lives.

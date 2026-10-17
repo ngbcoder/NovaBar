@@ -187,8 +187,10 @@ func TestParseRoundTrip(t *testing.T) {
 	original.Tiling.InnerGap = 12
 	original.General.HideTaskbar = true
 	original.Bars = []BarConfig{
-		{Edge: "top", Size: 44, Enabled: true, Name: "main"},
-		{Edge: "right", Size: 6, Enabled: true, Name: "edge"},
+		// Widget is set explicitly because validation defaults an empty one to "bar",
+		// so a fixture leaving it blank would not round-trip byte-identically.
+		{Edge: "top", Size: 44, Enabled: true, Name: "main", Widget: "bar", Transparent: true},
+		{Edge: "right", Size: 6, Enabled: true, Name: "edge", Widget: "dock"},
 	}
 	original.Hotkeys.Launcher = "Win+Space"
 

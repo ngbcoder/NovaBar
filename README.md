@@ -16,11 +16,16 @@ Go 1.22+ to build. No other dependencies.
 
 ## Status
 
-Milestone 1.5 (Safety & Correctness) complete. See [Roadmap](#roadmap).
+Milestones 1–3 are complete, and the M4 UI layer is working end to end.
 
-The daemon, tiling engine, IPC, config, launcher and CLI work. The WebView2 UI
-surfaces (bar, dock, launcher overlay) are **not** built yet — each bar currently
-reserves its space with a plain Win32 AppBar window and nothing is drawn in it.
+The bar is a live WebView2 surface hosted inside the shell's own AppBar window, talking
+to the daemon over the authenticated JSON-RPC interface. Verified: the surface attaches,
+the environment starts, the widget loads from the loopback listener, connects back, and
+subscribes to its topics.
+
+Not built yet: the dock and launcher overlay surfaces, widget manifest permission
+enforcement, and the GSMTC media bridge (the bar's media area works but stays hidden
+until real media data exists).
 
 ## Safety
 
@@ -149,8 +154,35 @@ internal/rpc      token-authenticated JSON-RPC over loopback WebSocket + control
 internal/launcher Start Menu + PATH indexing, ranked search, validated launch
 internal/hotkey   global hotkey registration
 internal/watchdog detached recovery process
+internal/webview  WebView2 surfaces hosted in the bar windows, widget loading
 internal/media    GSMTC seam (bridge not implemented; reports unavailable honestly)
 ```
+
+### Widgets
+
+A widget is a directory under `widgets/` with an `index.html` and an optional
+`manifest.json`. There is no build step and no bundler: the daemon serves the directory
+over loopback and a surface navigates to it.
+
+```toml
+[[bars]]
+edge = 'top'
+size = 40
+enabled = true
+name = 'main'
+widget = 'bar'          # directory under the widgets root
+transparent = true      # composite over the desktop
+```
+
+The widget root is found next to the executable, then under the working directory, or
+set explicitly with `NOVABAR_WIDGETS` when running from a checkout.
+
+The RPC endpoint and session token are **injected** into the page by the daemon before
+it loads, as `window.NOVABAR`. They are not written into any file, so a widget on disk
+contains no credentials. `sdk/novabar.js` is served from `/sdk` and imported directly.
+
+Widget assets are served without the session token: they are static presentation with
+no secrets in them, and the token arrives at runtime instead.
 
 ### IPC
 
@@ -175,7 +207,7 @@ sdk.subscribe("windows.updated", onWindows);
 | M1 Win32 core, safety foundations | Done |
 | M2 Pure-function tiling engine | Done |
 | M3 AppBar, workspaces, taskbar management | Done (multi-bar) |
-| M4 WebView2 UI, widget platform | Not started — route now proven, see below |
+| M4 WebView2 UI, widget platform | Bar surface done; dock, launcher and manifest permissions remain |
 | M5 App launcher, GSMTC media | Partial (launcher done; media bridge not implemented) |
 
 ### Open risk: WebView2 vs. the no-cgo constraint — **resolved**

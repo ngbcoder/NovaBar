@@ -67,6 +67,12 @@ type BarConfig struct {
 	Enabled bool `toml:"enabled"`
 	// Name is a free-form label for status output and future per-bar styling.
 	Name string `toml:"name"`
+	// Widget names the widget directory this bar renders, under the widgets root.
+	// Empty means "bar", the shipped default.
+	Widget string `toml:"widget"`
+	// Transparent composites the widget over the desktop instead of painting an
+	// opaque background.
+	Transparent bool `toml:"transparent"`
 }
 
 // HotkeyConfig holds the global hotkey bindings as config strings, e.g. "Win+Space".
@@ -106,7 +112,7 @@ func DefaultConfig() Config {
 		// One top bar out of the box. Users can enable more from config.toml by
 		// adding further [[bars]] entries, at most one per edge.
 		Bars: []BarConfig{
-			{Edge: "top", Size: 40, Enabled: true, Name: "main"},
+			{Edge: "top", Size: 40, Enabled: true, Name: "main", Widget: "bar"},
 		},
 		Hotkeys: HotkeyConfig{
 			Rescue:        "Ctrl+Alt+Shift+R",
@@ -303,6 +309,11 @@ func validateBars(bars []BarConfig) error {
 		}
 		if bars[i].Size > 400 {
 			return fmt.Errorf("bars[%d].size %d is implausible; expected 1..400", i, bars[i].Size)
+		}
+
+		bars[i].Widget = strings.TrimSpace(bars[i].Widget)
+		if bars[i].Widget == "" {
+			bars[i].Widget = "bar"
 		}
 	}
 	return nil

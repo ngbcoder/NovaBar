@@ -10,11 +10,11 @@
 package webview
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"sync"
 
+	"github.com/ngbcoder/NovaBar/internal/win"
 	"github.com/wailsapp/go-webview2/pkg/edge"
 	"github.com/wailsapp/go-webview2/webviewloader"
 	"golang.org/x/sys/windows"
@@ -103,34 +103,32 @@ type Surface struct {
 	ready bool
 }
 
-// comInitOnce guards the apartment initialization.
+// comInitState records the apartment initialization for this process.
 //
-// WebView2 requires a single-threaded apartment, and it must be initialized on the
-// thread that will own the controller, which is the daemon's pinned message-pump
-// thread. Initializing per-Surface would be wrong: a second CoInitializeEx on the same
-// thread returns S_FALSE or RPC_E_CHANGED_MODE rather than doing anything useful.
-var comInitOnce sync.Once
+// WebView2 requires a single-threaded apartment on the thread that owns the
+// controller, which is the daemon's pinned message pump. Initializing per-Surface
+// would be wrong: COM reference counts per thread, so a second initialization is a
+// no-op that reports S_FALSE, and a matching CoUninitialize would unbalance the count.
+var comInitState struct {
+	once sync.Once
+	err  error
+}
 
 // initializeApartment puts the calling thread into an STA for WebView2.
 //
 // Must be called on the message-pump thread before any Surface is attached.
 func initializeApartment() error {
-	var initErr error
-
-	comInitOnce.Do(func() {
-		// S_FALSE means the thread was already initialized in a compatible mode, which
-		// is fine. RPC_E_CHANGED_MODE means it was initialized differently, which we
-		// cannot recover from but also cannot make worse.
-		err := windows.CoInitializeEx(0, windows.COINIT_APARTMENTTHREADED)
-		switch {
-		case err == nil:
-		case errors.Is(err, windows.S_FALSE):
-		default:
-			initErr = fmt.Errorf("could not initialize COM for WebView2: %w", err)
+	comInitState.once.Do(func() {
+		already, err := win.CoInitializeApartment()
+		if err != nil {
+			comInitState.err = err
+			return
+		}
+		if already {
+			log.Printf("[NovaBar WebView] COM apartment was already initialized on this thread\n")
 		}
 	})
-
-	return initErr
+	return comInitState.err
 }
 
 // Attach embeds a WebView2 surface into an existing window.
@@ -152,11 +150,18 @@ func Attach(parent windows.HWND, opts Options) (*Surface, error) {
 		args = DefaultBrowserArgs
 	}
 
-	c := &edge.Chromium{
-		Debug:                 opts.Debug,
-		DataPath:              opts.DataPath,
-		AdditionalBrowserArgs: args,
-	}
+	// NewChromium must be used rather than a struct literal.
+	//
+	// edge.Chromium carries unexported state (the COM completion handlers, the binding
+	// table, the controller) that only its constructor wires up. Building one as
+	// &edge.Chromium{...} compiles, passes every field check, and then panics with a nil
+	// dereference the first time WebView2 signals that the environment is ready, because
+	// the environment completion handler was never created.
+	c := edge.NewChromium()
+
+	c.Debug = opts.Debug
+	c.DataPath = opts.DataPath
+	c.AdditionalBrowserArgs = args
 
 	if opts.OnMessage != nil {
 		onMessage := opts.OnMessage
@@ -166,11 +171,10 @@ func Attach(parent windows.HWND, opts Options) (*Surface, error) {
 	}
 	if opts.OnNavigationComplete != nil {
 		onNav := opts.OnNavigationComplete
-		c.NavigationCompletedCallback = func(_ *edge.ICoreWebView2, args *edge.ICoreWebView2NavigationCompletedEventArgs) {
-			// The args type carries no exported success accessor, so treat a completed
-			// navigation as success and let the page report real failures over the
-			// message channel, where it can be more specific than a boolean anyway.
-			_ = args
+		c.NavigationCompletedCallback = func(_ *edge.ICoreWebView2, _ *edge.ICoreWebView2NavigationCompletedEventArgs) {
+			// The args type exposes no success accessor, so a completed navigation is
+			// reported as success and real failures come back over the message channel,
+			// where the page can be more specific than a boolean.
 			onNav(true)
 		}
 	}
@@ -311,8 +315,3 @@ func (s *Surface) Destroy() {
 	// stops the in-process callbacks that would otherwise fire into freed Go memory.
 	s.chromium.ShuttingDown()
 }
-
-// uintptrOf is a small helper for tests and callers holding raw handles.
-func uintptrOf(h windows.HWND) uintptr { return uintptr(h) }
-
-var _ = unsafe.Pointer(nil)

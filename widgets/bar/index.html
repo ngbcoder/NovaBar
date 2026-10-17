@@ -1,73 +1,154 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="utf-8">
   <title>NovaBar</title>
   <style>
     :root {
-      --bg: rgba(18, 20, 24, 0.85);
+      --bg: rgba(20, 22, 26, 0.82);
       --accent: #3b82f6;
       --text: #f3f4f6;
       --dim: #9ca3af;
+      --hover: rgba(255, 255, 255, 0.10);
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* The whole document ignores pointer events, and only real controls opt back in.
+       Seelen solves transparency the same way: no WM_NCHITTEST work at all, just
+       pointer-events in CSS. Inside a bar the reserved strip means there is nothing
+       underneath to click through to anyway, but this keeps the strip from swallowing
+       clicks meant for whatever is behind it before the reservation lands. */
+    html, body {
+      pointer-events: none;
+      background: transparent;
+    }
+
     body {
-      background: var(--bg);
-      backdrop-filter: blur(16px);
+      height: 40px;
       color: var(--text);
-      font-family: 'Segoe UI Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
       font-size: 13px;
+      -webkit-user-select: none;
+      user-select: none;
+      overflow: hidden;
+    }
+
+    .bar {
+      height: 40px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      height: 40px;
-      padding: 0 16px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      gap: 14px;
+      padding: 0 12px;
+      background: var(--bg);
+      backdrop-filter: blur(18px) saturate(140%);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
     }
-    .left, .center, .right { display: flex; align-items: center; gap: 8px; }
-    .brand { font-weight: 700; color: var(--accent); letter-spacing: 0.5px; }
-    .workspace-btn {
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      color: var(--dim);
-      border-radius: 6px;
+
+    .brand {
+      pointer-events: auto;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 0.4px;
       padding: 4px 8px;
-      cursor: pointer;
+      border-radius: 6px;
+      cursor: default;
+    }
+
+    .workspaces { display: flex; gap: 4px; }
+
+    .ws {
+      pointer-events: auto;
+      min-width: 26px;
+      height: 24px;
+      padding: 0 7px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--dim);
       font-size: 12px;
-      transition: all 0.15s ease;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 120ms ease, color 120ms ease;
     }
-    .workspace-btn.active {
+    .ws:hover { background: var(--hover); color: var(--text); }
+    .ws.active {
       background: var(--accent);
+      border-color: var(--accent);
       color: #fff;
-      font-weight: 600;
+      font-weight: 700;
     }
-    .clock { font-weight: 600; }
+
+    .title {
+      flex: 1;
+      min-width: 0;
+      text-align: center;
+      color: var(--dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 12px;
+    }
+
+    .tray { display: flex; align-items: center; gap: 10px; }
+
+    .media { display: flex; align-items: center; gap: 8px; max-width: 260px; }
+    .media-info { min-width: 0; text-align: right; }
+    .media-title, .media-artist {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .media-title { font-size: 12px; font-weight: 600; }
+    .media-artist { font-size: 11px; color: var(--dim); }
+    .media-btn {
+      pointer-events: auto;
+      width: 26px; height: 26px;
+      border: none;
+      border-radius: 6px;
+      background: var(--hover);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+    }
+    .media-btn:hover { background: rgba(255, 255, 255, 0.18); }
+
+    .clock { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 12px; }
+
+    .offline {
+      pointer-events: auto;
+      color: #f87171;
+      font-size: 11px;
+      display: none;
+    }
+    .offline.show { display: block; }
   </style>
 </head>
 <body>
-  <div class="left">
+  <div class="bar">
     <div class="brand">NovaBar</div>
-    <div id="workspaces">
-      <button class="workspace-btn active">1</button>
-      <button class="workspace-btn">2</button>
-      <button class="workspace-btn">3</button>
-      <button class="workspace-btn">4</button>
+
+    <div class="workspaces" id="workspaces"></div>
+
+    <div class="title" id="window-title">NovaBar</div>
+
+    <div class="tray">
+      <span class="offline" id="offline">offline</span>
+
+      <div class="media" id="media" hidden>
+        <button class="media-btn" id="media-prev" title="Previous track">&#9198;</button>
+        <button class="media-btn" id="media-toggle" title="Play or pause">&#9208;</button>
+        <button class="media-btn" id="media-next" title="Next track">&#9197;</button>
+        <div class="media-info">
+          <div class="media-title" id="media-title"></div>
+          <div class="media-artist" id="media-artist"></div>
+        </div>
+      </div>
+
+      <div class="clock" id="clock">--:--:--</div>
     </div>
   </div>
-  <div class="center" id="window-title">
-    <span>Ready</span>
-  </div>
-  <div class="right">
-    <div class="clock" id="clock">00:00:00</div>
-  </div>
 
-  <script>
-    function updateClock() {
-      const now = new Date();
-      document.getElementById('clock').textContent = now.toLocaleTimeString();
-    }
-    setInterval(updateClock, 1000);
-    updateClock();
-  </script>
+  <script type="module" src="./main.js"></script>
 </body>
 </html>
