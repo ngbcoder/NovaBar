@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="branding/wordmark-dark.png" alt="NovaBar" width="420">
+</p>
+
 # NovaBar
 
 A lightweight desktop shell and tiling window manager for **Windows 11**, written in

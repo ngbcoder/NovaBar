@@ -5,9 +5,39 @@ Source artwork and the generated icon resources.
 | File | What it is |
 | --- | --- |
 | `novabar.ico` | Multi-resolution Windows icon, 16–256px. Committed. |
-| `novabar-256.png` | The 256px frame as a PNG, for docs or a future web favicon. |
+| `novabar-256.png` | The 256px frame as a PNG, for docs. |
+| `wordmark-dark.png` | The "NovaBar" wordmark on the dark pill, transparent background. Used as the README banner. |
 | `novabar.rc` | Resource script. One line: `1 ICON "novabar.ico"`. |
 | `novabar.syso` | The compiled resource, copied into `cmd/daemon/` and `cmd/shellctl/`. |
+
+## The wordmark is mark plus text, and no "+"
+
+The source sheet carries lockups reading "NovaBar+". The product is `NovaBar`: the module
+is `github.com/ngbcoder/NovaBar`, the binary is `novabar.exe`, and the README says
+NovaBar. `wordmark-dark.png` is cut from a corrected sheet with the suffix removed.
+
+The banner is the **dark** pill on transparency rather than the cream one. The cream
+lockup is a bright block on GitHub's light theme and an unpleasant glare on the dark one;
+the dark pill reads as a badge on light and blends on dark. It is also the lockup the
+design intends, since the sheet presents it that way.
+
+Regenerate it after an artwork change by pointing the cropper at the dark pill's coarse
+bounds, measured from the luminance band that isolates tile fill from the page:
+
+```
+# dark pill occupies roughly x 1040..2240, y 150..660 in the 2400x1360 sheet
+crop <sheet>.png branding/wordmark-dark.png 1030 140 2250 670 640
+```
+
+The tool measures the block's exact bounds and corner radius itself; the arguments are only
+the coarse search region.
+
+## Not wired: a webview favicon
+
+There is deliberately no favicon route. The widgets render in WebView2 with no tab strip,
+so a favicon is never displayed — serving one would be a route nothing can see. The
+window icon comes from the `.syso` resource instead, which is what the taskbar, Alt-Tab and
+Explorer actually read.
 
 ## The icon is the mark only
 
