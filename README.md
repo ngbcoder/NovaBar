@@ -30,9 +30,11 @@ talking to the daemon over authenticated, permission-checked JSON-RPC:
 Verified together on a two-bar layout: both surfaces attach, connect, receive only the
 permissions their manifests declare, and subscribe to their topics.
 
-Still to do: the GSMTC media bridge (the bar's transport controls work but the media area
-stays hidden until real media data exists) and app pinning for the dock, which currently
-shows only running windows.
+Still to do: session property reads in the GSMTC media bridge (activation now works and
+is tested; reading a session's title, artist and transport state is not implemented, so
+the media area stays hidden) and app pinning for the dock, which currently shows only
+running windows. See [docs/gsmtc-m5-findings.md](docs/gsmtc-m5-findings.md) for why the
+read path was left unwritten.
 
 ## Safety
 
@@ -163,7 +165,7 @@ internal/hotkey   global hotkey registration
 internal/watchdog detached recovery process
 internal/webview  WebView2 surfaces hosted in the shell's own windows
 internal/overlay  transient surfaces that reserve no work area (the launcher)
-internal/media    GSMTC seam (bridge not implemented; reports unavailable honestly)
+internal/media    GSMTC bridge; WinRT activation, session reads not yet implemented
 ```
 
 ### Widgets
@@ -249,42 +251,52 @@ sdk.subscribe("windows.updated", onWindows);
 | M2 Pure-function tiling engine | Done |
 | M3 AppBar, workspaces, taskbar management | Done (multi-bar, multi-edge) |
 | M4 WebView2 UI, widget platform | Done (bar, dock, launcher, manifest permissions) |
-| M5 App launcher, GSMTC media | Partial (launcher done; media bridge not implemented) |
+| M5 App launcher, GSMTC media | Partial (launcher done; media activation done, session reads not) |
 | M6 Settings menu | Not started — see [Planned: settings menu](#planned-settings-menu) |
 
-### Open risk: WebView2 vs. the no-cgo constraint — **resolved**
+### Open risk: COM dependencies vs. the no-cgo constraint — **resolved twice**
 
-WebView2's `ICoreWebView2` is COM, and the obvious pure-Go route appeared blocked
-because `go-ole` needs cgo. It is not.
+Two things in this project need COM: WebView2's `ICoreWebView2`, and the WinRT GSMTC
+session manager. Both looked blocked, on the same reasoning — `go-ole` needs cgo.
 
-**`github.com/jchv/go-webview2` is pure Go and compiles, links and runs with
-`CGO_ENABLED=0`.** Its only dependencies are a DLL loader and `x/sys`.
+**It does not.** `github.com/go-ole/go-ole@v1.3.0` contains no `import "C"`, no `.c`,
+`.h` or `.syso` files, and loads `combase.dll` through `x/sys/windows` the same way the
+rest of this tree does. It builds with `CGO_ENABLED=0`, which `build.ps1 verify`
+asserts for the whole tree. Older go-ole releases did require cgo, which is probably
+where the belief comes from.
+
+For WebView2, the library in use is `github.com/wailsapp/go-webview2`, also pure Go. Its
+only dependencies are a DLL loader and `x/sys`.
 
 What actually cost the old NovaBar its no-cgo constraint was **Wails v3**, which
 requires cgo. Its `feat/m1-keep-awake` branch had already begun migrating to
 `jchv/go-webview2` when it stopped. Wails was the problem, not WebView2 — worth
 remembering before reaching for a framework.
 
-`jchv/go-webview2` also exposes `Create(debug bool, window unsafe.Pointer)`, which
-attaches to an **existing HWND**. WebView2 can therefore be hosted inside the AppBar
-window `internal/bar` already owns, which keeps the work-area reservation logic where it
-is and confines the new dependency to one package.
+The reason this is worth stating at length: the tempting move when a COM dependency
+seems to need cgo is to relax the constraint, and relaxing a safety property is much
+harder to undo than adding a dependency. Checking was cheaper than the trade-off.
+
+Hosting WebView2 inside the AppBar window `internal/bar` already owns keeps the
+work-area reservation logic where it is and confines the new dependency to one package.
+That requires an entry point which attaches to an **existing HWND**, and it is worth
+being precise about which one, because the obvious candidate does not do it:
+
+- `jchv/go-webview2` exposes `Create(debug bool, window unsafe.Pointer)` and its
+  signature suggests it attaches. It **discards its `window` argument**. Its
+  `pkg/edge` also hardcodes a null `environmentOptions` at `chromium.go:87`, so
+  Chromium command-line arguments cannot be passed at all.
+- `wailsapp/go-webview2` is what actually ships. It attaches to an existing HWND and has
+  `WithAdditionalBrowserArguments`, which is what makes the timer-throttling fix
+  possible.
+
+Without `--disable-background-timer-throttling` a never-focused bar has its timers
+throttled to roughly one tick per second, so losing those arguments is not cosmetic.
 
 See [docs/webview2-m4-findings.md](docs/webview2-m4-findings.md) for the verification
 steps and for what `ngbcoder/SeelenNovaBar` does that is worth copying — window flags,
 the Chromium arguments a desktop bar *must* pass, and why the transparency approach is
 CSS rather than Win32 hit-testing.
-
-> **Correction to the section above.** The library actually in use is
-> `wailsapp/go-webview2`, not `jchv/go-webview2`. Both are pure Go and both build with
-> `CGO_ENABLED=0`, but jchv's `pkg/edge` hardcodes a null `environmentOptions` at
-> `chromium.go:87`, so Chromium command-line arguments cannot be passed at all — which
-> loses the timer-throttling fix described above. `wailsapp/go-webview2` has
-> `WithAdditionalBrowserArguments` and attaches to an existing HWND.
->
-> Also: jchv's `Create(debug, window)` discards its `window` argument, so it cannot
-> attach to an existing window at all. The path that does work is `NewWindow` or
-> `NewWithOptions`.
 
 ## Planned: settings menu (M6)
 
