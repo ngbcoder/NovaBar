@@ -18,11 +18,12 @@ class PendingCall {
 
 export class NovaBarSDK {
     /**
-     * @param {{port?: number, token?: string, url?: string}} options
+     * @param {{port?: number, token?: string, widgetToken?: string, url?: string}} options
      */
     constructor(options = {}) {
         this.port = options.port;
         this.token = options.token;
+        this.widgetToken = options.widgetToken;
         this.url = options.url;
 
         this.ws = null;
@@ -44,7 +45,13 @@ export class NovaBarSDK {
     endpoint() {
         if (this.url) return this.url;
         if (!this.port) throw new Error('NovaBarSDK: no port or url supplied');
-        return `ws://127.0.0.1:${this.port}/ws?token=${encodeURIComponent(this.token ?? '')}`;
+
+        const params = new URLSearchParams({ token: this.token ?? '' });
+        // The widget credential is what carries this surface's permissions. Omitting it
+        // still connects, but every privileged call is then refused.
+        if (this.widgetToken) params.set('widget', this.widgetToken);
+
+        return `ws://127.0.0.1:${this.port}/ws?${params.toString()}`;
     }
 
     /**

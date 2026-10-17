@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -19,6 +21,7 @@ import (
 	"github.com/ngbcoder/NovaBar/internal/launcher"
 	"github.com/ngbcoder/NovaBar/internal/media"
 	"github.com/ngbcoder/NovaBar/internal/onboarding"
+	"github.com/ngbcoder/NovaBar/internal/overlay"
 	"github.com/ngbcoder/NovaBar/internal/rpc"
 	"github.com/ngbcoder/NovaBar/internal/tiling"
 	"github.com/ngbcoder/NovaBar/internal/tracker"
@@ -42,10 +45,17 @@ type daemon struct {
 	cfg     config.Config
 	watcher *config.Watcher
 
-	taskbars *win.TaskbarState
-	bars     *bar.Manager
-	surfaces map[string]*webview.Surface // keyed by bar name
-	widgets  string                      // resolved widget root
+	taskbars      *win.TaskbarState
+	bars          *bar.Manager
+	surfaces      map[string]*webview.Surface // keyed by bar name
+	widgetSecrets map[string]string           // keyed by bar name
+	widgets       string                      // resolved widget root
+
+	// launcher is the transient launcher overlay, nil when not showing. Unlike the bars
+	// it reserves no work area, because reserving space for something that appears for
+	// a few seconds would reflow the whole desktop every time it opened.
+	launcher       *overlay.Overlay
+	launcherSecret string
 
 	trk     *tracker.WindowTracker
 	engine  *tiling.Engine
@@ -85,11 +95,12 @@ func Run() {
 	log.Println("[NovaBar] Starting daemon")
 
 	d := &daemon{
-		taskbars: win.NewTaskbarState(),
-		bars:     bar.NewManager(),
-		surfaces: make(map[string]*webview.Surface, 4),
-		trk:      tracker.NewWindowTracker(),
-		spaces:   workspace.NewManager(),
+		taskbars:      win.NewTaskbarState(),
+		bars:          bar.NewManager(),
+		surfaces:      make(map[string]*webview.Surface, 4),
+		widgetSecrets: make(map[string]string, 4),
+		trk:           tracker.NewWindowTracker(),
+		spaces:        workspace.NewManager(),
 	}
 	// Capture the pump thread before anything can signal us, so an early Ctrl+C still
 	// reaches the message loop.
@@ -289,6 +300,12 @@ func (d *daemon) applyBars(cfg config.Config) {
 	}
 
 	d.warnAboutCollapsedBars()
+
+	// Recompute every bar's rectangle before attaching surfaces, so adjacent edges do
+	// not both claim the corner and a left dock starts below the top bar rather than
+	// underneath it.
+	d.bars.RecomputeRects(win.GetSystemMetrics(0), win.GetSystemMetrics(1))
+
 	d.syncSurfaces(cfg)
 
 	log.Printf("[NovaBar] %d bar(s) active\n", d.bars.Count())
@@ -334,10 +351,10 @@ func (d *daemon) syncSurfaces(cfg config.Config) {
 
 		existing, has := d.surfaces[name]
 		if has {
-			// Same widget on the same bar: just resize and tell WebView2 the parent
-			// moved, which is what a bar being repositioned requires.
-			existing.Resize(0, 0, int32(bc.Size), int32(bc.Size))
-			existing.NotifyParentMoved()
+			// Same widget on the same bar: refit the surface to the bar's current
+			// rectangle and tell WebView2 the parent moved, which is what a bar being
+			// resized or repositioned requires.
+			d.fitSurface(existing, ab)
 			continue
 		}
 
@@ -349,14 +366,45 @@ func (d *daemon) syncSurfaces(cfg config.Config) {
 		d.surfaces[name] = surface
 	}
 
-	// Release surfaces whose bar is gone.
+	// Release surfaces whose bar is gone, revoking each credential with it.
 	for name, surface := range d.surfaces {
 		if live[name] {
 			continue
 		}
 		surface.Destroy()
 		delete(d.surfaces, name)
+		if secret, ok := d.widgetSecrets[name]; ok {
+			d.rpcs.RevokeWidget(secret)
+			delete(d.widgetSecrets, name)
+		}
 	}
+}
+
+// randomSecret returns a 256-bit hex credential for a surface.
+func randomSecret() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("could not generate a widget credential: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+// fitSurface refits a surface to its bar's current rectangle.
+//
+// The surface must track the bar's real extent, not its thickness: a top bar is wide
+// and short, a left dock is narrow and full height. Sizing both to thickness squared
+// renders a left dock as a small square sitting in the top-left corner, on top of the
+// top bar, which reads as "the dock is missing" rather than as a sizing mistake.
+func (d *daemon) fitSurface(surface *webview.Surface, ab *bar.AppBarManager) {
+	if surface == nil {
+		return
+	}
+	bounds := ab.Bounds()
+	if bounds.Width() <= 0 || bounds.Height() <= 0 {
+		return
+	}
+	surface.Resize(0, 0, bounds.Width(), bounds.Height())
+	surface.NotifyParentMoved()
 }
 
 // attachSurface creates a WebView2 surface inside a bar's window and loads its widget.
@@ -366,16 +414,34 @@ func (d *daemon) attachSurface(ab *bar.AppBarManager, bc config.BarConfig, name 
 		widget = "bar"
 	}
 
-	permissions, err := d.readManifestPermissions(widget)
+	declared, err := d.readManifestPermissions(widget)
 	if err != nil {
 		log.Printf("[NovaBar] Widget %q has no readable manifest: %v\n", widget, err)
 	}
 
+	// A per-surface credential, separate from the session token, is what carries this
+	// widget's permissions. Generated here rather than derived from the widget name so a
+	// second surface for the same widget still gets its own revocable secret.
+	widgetSecret, err := randomSecret()
+	if err != nil {
+		return nil, err
+	}
+	if err := d.rpcs.RegisterWidget(widgetSecret, name, declared); err != nil {
+		// A bad permission in a manifest must not take the bar down; deny the widget
+		// everything and say so.
+		log.Printf("[NovaBar] Widget %q has an invalid manifest: %v\n", widget, err)
+		if regErr := d.rpcs.RegisterWidget(widgetSecret, name, nil); regErr != nil {
+			return nil, regErr
+		}
+	}
+	d.widgetSecrets[name] = widgetSecret
+
 	boot := webview.Bootstrap{
 		Port:        d.rpcs.Port(),
 		Token:       d.rpcs.Token(),
+		WidgetToken: widgetSecret,
 		Widget:      widget,
-		Permissions: permissions,
+		Permissions: declared,
 	}
 	js, err := boot.BootstrapJS()
 	if err != nil {
@@ -399,8 +465,8 @@ func (d *daemon) attachSurface(ab *bar.AppBarManager, bc config.BarConfig, name 
 	url := webview.WidgetURL(d.rpcs.Port(), widget)
 	surface.Navigate(url)
 
-	// Fit the webview to the bar. The bounds are relative to the parent window.
-	surface.Resize(0, 0, int32(bc.Size), int32(bc.Size))
+	// Fit the webview to the bar's real extent, not its thickness.
+	d.fitSurface(surface, ab)
 
 	log.Printf("[NovaBar] %s bar rendering widget %q from %s\n", name, widget, url)
 	return surface, nil
@@ -466,9 +532,23 @@ func (d *daemon) teardown() {
 	if d.hotkeys != nil {
 		d.hotkeys.Stop()
 	}
+	if d.launcher != nil {
+		d.launcher.Close()
+		d.launcher = nil
+	}
+	if d.launcherSecret != "" && d.rpcs != nil {
+		d.rpcs.RevokeWidget(d.launcherSecret)
+		d.launcherSecret = ""
+	}
 	for name, surface := range d.surfaces {
 		surface.Destroy()
 		delete(d.surfaces, name)
+	}
+	for name, secret := range d.widgetSecrets {
+		if d.rpcs != nil {
+			d.rpcs.RevokeWidget(secret)
+		}
+		delete(d.widgetSecrets, name)
 	}
 	if d.watcher != nil {
 		d.watcher.Close()
@@ -572,9 +652,7 @@ func (d *daemon) handleHotkey(id uintptr) {
 		log.Println("[NovaBar] Rescue hotkey pressed; restoring the desktop")
 		d.performRescue()
 	case hotkey.ActionToggleLauncher:
-		// The launcher surface is an M4 deliverable. Until then the toggle still
-		// resolves to something honest rather than silently doing nothing.
-		log.Println("[NovaBar] Launcher toggle: no launcher surface attached yet (arrives with the WebView2 UI in M4)")
+		d.toggleLauncher()
 	case hotkey.ActionWorkspacePrev:
 		d.spaces.Step(-1)
 		d.afterWorkspaceChange()
@@ -582,6 +660,70 @@ func (d *daemon) handleHotkey(id uintptr) {
 		d.spaces.Step(1)
 		d.afterWorkspaceChange()
 	}
+}
+
+// toggleLauncher shows the launcher overlay, or dismisses it if already showing.
+//
+// Runs on the pump thread, since creating the overlay's window and its WebView2
+// controller both belong there.
+func (d *daemon) toggleLauncher() {
+	if d.launcher != nil {
+		d.launcher.Close()
+		d.launcher = nil
+		return
+	}
+	if d.widgets == "" {
+		log.Println("[NovaBar] No widgets directory; cannot show the launcher")
+		return
+	}
+
+	secret, err := randomSecret()
+	if err != nil {
+		log.Printf("[NovaBar] Could not create a launcher credential: %v\n", err)
+		return
+	}
+	if err := d.rpcs.RegisterWidget(secret, "launcher", []string{
+		rpc.PermLauncherUse,
+		rpc.PermWindowsRead,
+	}); err != nil {
+		log.Printf("[NovaBar] Launcher credential rejected: %v\n", err)
+		return
+	}
+
+	boot := webview.Bootstrap{
+		Port:        d.rpcs.Port(),
+		Token:       d.rpcs.Token(),
+		WidgetToken: secret,
+		Widget:      "launcher",
+		Permissions: []string{rpc.PermLauncherUse, rpc.PermWindowsRead},
+	}
+	js, err := boot.BootstrapJS()
+	if err != nil {
+		log.Printf("[NovaBar] Could not build the launcher bootstrap: %v\n", err)
+		return
+	}
+
+	ov, err := overlay.Show(overlay.Options{
+		Widget:  "launcher",
+		Width:   660,
+		Height:  440,
+		AnchorX: 0.5,
+		AnchorY: 0.35,
+		OnMessage: func(payload string) {
+			d.handleWidgetMessage("launcher", payload)
+		},
+	})
+	if err != nil {
+		d.rpcs.RevokeWidget(secret)
+		log.Printf("[NovaBar] Could not show the launcher: %v\n", err)
+		return
+	}
+
+	d.launcher = ov
+	d.launcherSecret = secret
+
+	ov.SetBootstrap(js)
+	ov.Navigate(webview.WidgetURL(d.rpcs.Port(), "launcher"))
 }
 
 // performRescue restores the desktop and exits.

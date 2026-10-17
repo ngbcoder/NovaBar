@@ -21,7 +21,11 @@ const el = {
   mediaPrev: document.getElementById('media-prev'),
 };
 
-const sdk = new NovaBarSDK({ port: boot.port, token: boot.token });
+const sdk = new NovaBarSDK({
+    port: boot.port,
+    token: boot.token,
+    widgetToken: boot.widget_token,
+});
 
 /** Workspaces currently known to the daemon, so buttons can be rebuilt without flicker. */
 let knownWorkspaces = [];

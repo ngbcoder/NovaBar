@@ -24,6 +24,22 @@ func startTestServer(t *testing.T) *Server {
 		}
 		return map[string]any{"action": command}, nil
 	})
+
+	// Register a stub for every method widgets may call, so permission tests exercise
+	// the dispatcher rather than tripping over a missing handler.
+	for method := range MethodPermissions() {
+		s.RegisterMethod(method, func(json.RawMessage) (interface{}, error) {
+			return map[string]any{"ok": true}, nil
+		})
+	}
+
+	// Every test server exposes one fully permitted widget credential, so tests that
+	// are about something other than permissions can simply dial as that widget.
+	s.testWidgetSecret = "test-widget"
+	if err := s.RegisterWidget(s.testWidgetSecret, "test", AllPermissions); err != nil {
+		t.Fatalf("RegisterWidget: %v", err)
+	}
+
 	if err := s.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -31,17 +47,32 @@ func startTestServer(t *testing.T) *Server {
 	return s
 }
 
-func dial(t *testing.T, s *Server, withToken bool) (*websocket.Conn, *http.Response, error) {
+func dial(t *testing.T, s *Server, opts ...dialOption) (*websocket.Conn, *http.Response, error) {
 	t.Helper()
 
 	u := url.URL{Scheme: "ws", Host: "127.0.0.1:" + itoa(s.Port()), Path: "/ws"}
-	if withToken {
-		q := u.Query()
-		q.Set("token", s.Token())
-		u.RawQuery = q.Encode()
+	q := u.Query()
+	q.Set("token", s.Token())
+
+	var withCred bool
+	for _, opt := range opts {
+		opt(&withCred)
 	}
+	if withCred {
+		q.Set("widget", s.testWidgetSecret)
+	}
+	u.RawQuery = q.Encode()
 
 	return websocket.DefaultDialer.Dial(u.String(), nil)
+}
+
+// dialOption configures a test dial.
+type dialOption func(*bool)
+
+// withWidget makes the dial present a widget credential. Tests that need any permission
+// at all must use this, since a session token on its own grants nothing.
+func withWidget(secret string) dialOption {
+	return func(with *bool) { *with = true }
 }
 
 func itoa(n int) string {
@@ -96,7 +127,7 @@ func TestWrongTokenIsRejected(t *testing.T) {
 func TestAuthenticatedUpgradeSucceeds(t *testing.T) {
 	s := startTestServer(t)
 
-	conn, _, err := dial(t, s, true)
+	conn, _, err := dial(t, s, withWidget(s.testWidgetSecret))
 	if err != nil {
 		t.Fatalf("authenticated dial failed: %v", err)
 	}
@@ -160,7 +191,7 @@ func TestPortIsEphemeral(t *testing.T) {
 
 func TestMethodNotFound(t *testing.T) {
 	s := startTestServer(t)
-	conn, _, err := dial(t, s, true)
+	conn, _, err := dial(t, s, withWidget(s.testWidgetSecret))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -186,7 +217,7 @@ func TestMethodNotFound(t *testing.T) {
 
 func TestParseError(t *testing.T) {
 	s := startTestServer(t)
-	conn, _, err := dial(t, s, true)
+	conn, _, err := dial(t, s, withWidget(s.testWidgetSecret))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -207,17 +238,20 @@ func TestParseError(t *testing.T) {
 
 func TestHandlerErrorPropagates(t *testing.T) {
 	s := startTestServer(t)
-	s.RegisterMethod("boom", func(json.RawMessage) (interface{}, error) {
+	// windows.get is a mapped method, so the widget needs windows.read to reach it at
+	// all; the handler then fails, which is what this test is about.
+	s.RegisterMethod(MethodWindowsGet, func(json.RawMessage) (interface{}, error) {
 		return nil, errBoom
 	})
+	secret := registerSurface(t, s, "bar", []string{PermWindowsRead})
 
-	conn, _, err := dial(t, s, true)
+	conn, _, err := dial(t, s, withWidget(secret))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	defer conn.Close()
 
-	_ = conn.WriteJSON(map[string]any{"jsonrpc": "2.0", "id": 7, "method": "boom"})
+	_ = conn.WriteJSON(map[string]any{"jsonrpc": "2.0", "id": 7, "method": MethodWindowsGet})
 
 	var resp Response
 	if err := readResponse(conn, &resp); err != nil {
@@ -243,13 +277,13 @@ func (e *testError) Error() string { return e.msg }
 func TestBroadcastReachesSubscribersOnly(t *testing.T) {
 	s := startTestServer(t)
 
-	subscriber, _, err := dial(t, s, true)
+	subscriber, _, err := dial(t, s, withWidget(s.testWidgetSecret))
 	if err != nil {
 		t.Fatalf("dial subscriber: %v", err)
 	}
 	defer subscriber.Close()
 
-	idle, _, err := dial(t, s, true)
+	idle, _, err := dial(t, s, withWidget(s.testWidgetSecret))
 	if err != nil {
 		t.Fatalf("dial idle: %v", err)
 	}
@@ -302,7 +336,7 @@ func TestBroadcastReachesSubscribersOnly(t *testing.T) {
 // channels and receive internal traffic.
 func TestBroadcastRejectsUnknownTopic(t *testing.T) {
 	s := startTestServer(t)
-	conn, _, err := dial(t, s, true)
+	conn, _, err := dial(t, s, withWidget(s.testWidgetSecret))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -329,7 +363,7 @@ func TestBroadcastRejectsUnknownTopic(t *testing.T) {
 func TestConcurrentBroadcastDoesNotRace(t *testing.T) {
 	s := startTestServer(t)
 
-	conn, _, err := dial(t, s, true)
+	conn, _, err := dial(t, s, withWidget(s.testWidgetSecret))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

@@ -1,0 +1,16 @@
+{
+  "id": "novabar.dock",
+  "name": "NovaBar Dock",
+  "version": "0.2.0",
+  "entry": "index.html",
+  "permissions": [
+    "windows.read",
+    "windows.control",
+    "launcher.use"
+  ],
+  "window": {
+    "kind": "dock",
+    "transparent": true,
+    "width": 64
+  }
+}

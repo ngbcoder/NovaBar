@@ -92,6 +92,73 @@ const (
 // HandlerFunc is the signature for RPC method handlers.
 type HandlerFunc func(params json.RawMessage) (interface{}, error)
 
+// widgetGrant records the permissions a surface was granted when attached.
+type widgetGrant struct {
+	widget      string
+	permissions []string
+}
+
+// widgetRegistry maps a per-surface credential to the permissions it carries.
+//
+// Distinct from the session token on purpose. The session token proves "this is a
+// widget in this shell"; the widget credential proves "this is the bar, and the bar is
+// allowed to close windows". Without the second, any page that somehow learned the
+// session token would inherit every capability.
+type widgetRegistry struct {
+	mu     sync.RWMutex
+	grants map[string]widgetGrant
+}
+
+// RegisterWidget issues a credential for a surface and returns it to be injected into
+// that surface's page.
+//
+// Unknown permissions are rejected rather than ignored, so a typo in a manifest fails
+// loudly instead of silently producing a widget that cannot do what it meant to.
+func (s *Server) RegisterWidget(secret, widget string, permissions []string) error {
+	granted := make([]string, 0, len(permissions))
+	for _, p := range permissions {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if !ValidPermission(p) {
+			return fmt.Errorf("widget %q declares unknown permission %q; known permissions are %v",
+				widget, p, AllPermissions)
+		}
+		granted = append(granted, p)
+	}
+
+	s.mu.Lock()
+	if s.widgets == nil {
+		s.widgets = &widgetRegistry{grants: make(map[string]widgetGrant)}
+	}
+	s.widgets.grants[secret] = widgetGrant{widget: widget, permissions: granted}
+	s.mu.Unlock()
+
+	return nil
+}
+
+// RevokeWidget removes a surface's credential, called when its surface is destroyed.
+func (s *Server) RevokeWidget(secret string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.widgets != nil {
+		delete(s.widgets.grants, secret)
+	}
+}
+
+// lookupWidget resolves a credential to its permission set.
+func (s *Server) lookupWidget(secret string) (widgetGrant, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.widgets == nil {
+		return widgetGrant{}, false
+	}
+	g, ok := s.widgets.grants[secret]
+	return g, ok
+}
+
 // Client is one connected widget or CLI session.
 type Client struct {
 	conn *websocket.Conn
@@ -102,6 +169,44 @@ type Client struct {
 
 	mu   sync.RWMutex
 	subs map[string]bool
+
+	// widgetID identifies the surface this connection belongs to, and permissions is
+	// the set that surface was granted when it was attached.
+	//
+	// A connection that did not present a widget credential gets an empty set, so the
+	// session token alone is not enough to call anything a widget can call.
+	widgetID    string
+	permissions map[string]bool
+}
+
+// hasPermission reports whether this client may call a method.
+func (c *Client) hasPermission(method string) error {
+	required, known := methodPermissions[method]
+	if !known {
+		// Not callable by widgets at all. See methodPermissions.
+		return fmt.Errorf("method %q is not available to widgets", method)
+	}
+
+	c.mu.RLock()
+	granted := c.permissions[required]
+	c.mu.RUnlock()
+
+	if !granted {
+		return errUnauthorized(method, required)
+	}
+	return nil
+}
+
+// describe returns what this connection is authorized for, for status output.
+func (c *Client) describe() (string, []string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	perms := make([]string, 0, len(c.permissions))
+	for p := range c.permissions {
+		perms = append(perms, p)
+	}
+	return c.widgetID, sortedPermissions(perms)
 }
 
 // Send writes one text frame safely.
@@ -160,6 +265,14 @@ type Server struct {
 
 	// assets are static trees mounted for the WebView2 surfaces.
 	assets []assetMount
+
+	// widgets holds the per-surface permission grants.
+	widgets *widgetRegistry
+
+	// testWidgetSecret is used only by the test helper to dial as a fully permitted
+	// widget. Kept on the struct so tests do not have to thread a credential through
+	// every helper signature.
+	testWidgetSecret string
 }
 
 // NewServer creates a Server with an ephemeral loopback port and a fresh auth token.
@@ -431,7 +544,24 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := &Client{conn: conn, subs: make(map[string]bool)}
+	client := &Client{conn: conn, subs: make(map[string]bool), permissions: make(map[string]bool)}
+
+	// Resolve the surface credential, if the page presented one. Absent or unknown means
+	// no permissions at all: the session token authorizes the connection but grants
+	// nothing on its own.
+	widgetSecret := r.URL.Query().Get("widget")
+	if widgetSecret != "" {
+		if grant, ok := s.lookupWidget(widgetSecret); ok {
+			client.widgetID = grant.widget
+			for _, p := range grant.permissions {
+				client.permissions[p] = true
+			}
+			log.Printf("[NovaBar IPC] %s connected with permissions %v\n",
+				grant.widget, sortedPermissions(grant.permissions))
+		} else {
+			log.Printf("[NovaBar IPC] widget presented an unknown credential; connected with no permissions\n")
+		}
+	}
 
 	s.mu.Lock()
 	s.clients[client] = true
@@ -490,6 +620,18 @@ func (s *Server) dispatch(client *Client, msg []byte) {
 		return
 	}
 
+	// Enforce the widget's declared permissions before invoking anything. Done after
+	// the existence check so an unknown method still reports not-found rather than
+	// leaking whether a known-but-forbidden method exists.
+	if err := client.hasPermission(req.Method); err != nil {
+		_ = client.Send(Response{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error:   &RPCError{Code: CodeUnauthorized, Message: err.Error()},
+		})
+		return
+	}
+
 	result, err := handler(req.Params)
 	if err != nil {
 		_ = client.Send(Response{
@@ -531,7 +673,12 @@ func (s *Server) handleSubscribe(client *Client, msg []byte) {
 
 	accepted := make([]string, 0, len(topics))
 	for _, t := range topics {
+		// Gate subscriptions on permission, same as calls. Otherwise a widget with no
+		// permissions is still pushed every window title on the desktop.
 		if !known[t] {
+			continue
+		}
+		if raw.Method == "subscribe" && !client.hasTopic(t) {
 			continue
 		}
 		if raw.Method == "subscribe" {
@@ -540,6 +687,19 @@ func (s *Server) handleSubscribe(client *Client, msg []byte) {
 			client.Unsubscribe(t)
 		}
 		accepted = append(accepted, t)
+	}
+
+	if raw.Method == "subscribe" && len(accepted) < len(topics) {
+		_ = client.Send(Response{
+			JSONRPC: "2.0",
+			ID:      raw.ID,
+			Error: &RPCError{
+				Code: CodeUnauthorized,
+				Message: fmt.Sprintf("not permitted to subscribe to %d of %d requested topics; "+
+					"subscribing needs %q", len(topics)-len(accepted), len(topics), PermWindowsRead),
+			},
+		})
+		return
 	}
 
 	_ = client.Send(Response{

@@ -15,6 +15,11 @@ type Bootstrap struct {
 	Port int `json:"port"`
 	// Token authorizes this widget against the RPC server.
 	Token string `json:"token"`
+	// WidgetToken is a per-surface credential that determines which permissions this
+	// widget is allowed to exercise. Distinct from Token: the session token proves the
+	// page belongs to this shell, while this proves which surface it is and therefore
+	// what its manifest was allowed to ask for.
+	WidgetToken string `json:"widget_token"`
 	// Widget is the name of the widget being loaded, so a widget shipped for one
 	// surface can detect it is running in another.
 	Widget string `json:"widget"`
@@ -57,6 +62,7 @@ func (b Bootstrap) BootstrapJS() (string, error) {
   window.NOVABAR = {
     port: cfg.port,
     token: cfg.token,
+    widget_token: cfg.widget_token,
     widget: cfg.widget,
     permissions: cfg.permissions || [],
     hasBridge: typeof window.chrome !== 'undefined' && !!window.chrome.webview,

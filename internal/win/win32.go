@@ -232,11 +232,13 @@ const (
 	HotkeyWorkspaceNext
 )
 
+// RECT carries explicit JSON tags so widgets see the same field names as every other
+// payload crossing the IPC boundary.
 type RECT struct {
-	Left   int32
-	Top    int32
-	Right  int32
-	Bottom int32
+	Left   int32 `json:"left"`
+	Top    int32 `json:"top"`
+	Right  int32 `json:"right"`
+	Bottom int32 `json:"bottom"`
 }
 
 func (r RECT) Width() int32  { return r.Right - r.Left }

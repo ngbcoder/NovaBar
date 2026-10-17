@@ -295,7 +295,13 @@ func (ab *AppBarManager) updatePositionLocked() {
 	// a zero-size window and an invisible bar, when the truth is that the bar simply
 	// could not claim work-area credit. Drawing the strip and letting the engine
 	// compensate is more useful and more honest.
-	ab.requested = ab.edgeInset(screenW, screenH, ab.size)
+	//
+	// The rect is normally supplied by Manager.recomputeRects, which insets each bar by
+	// the thickness of the others so adjacent edges do not both claim the corner. Only
+	// fall back to the bare edge calculation when running standalone.
+	if !ab.rectIsValid(ab.requested) {
+		ab.requested = ab.edgeInset(screenW, screenH, ab.size)
+	}
 	ab.grantedRect = granted
 	ab.grantedReason = reason
 
@@ -311,6 +317,27 @@ func (ab *AppBarManager) updatePositionLocked() {
 			win.SWP_NOACTIVATE|win.SWP_SHOWWINDOW,
 		)
 	}
+}
+
+// SetRequestedRect sets the rectangle this bar occupies, computed by the Manager.
+func (ab *AppBarManager) SetRequestedRect(rect win.RECT) {
+	ab.mu.Lock()
+	ab.requested = rect
+	hwnd := ab.hwnd
+	ab.mu.Unlock()
+
+	if hwnd == 0 || !ab.rectIsValid(rect) {
+		return
+	}
+	_ = win.SetWindowPos(
+		hwnd,
+		win.HWND_TOPMOST,
+		rect.Left,
+		rect.Top,
+		rect.Width(),
+		rect.Height(),
+		win.SWP_NOACTIVATE|win.SWP_SHOWWINDOW,
+	)
 }
 
 // rectIsValid reports whether a rectangle has positive extent on both axes.

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>NovaBar Dock</title>
+  <style>
+    :root {
+      --bg: rgba(20, 22, 26, 0.78);
+      --accent: #3b82f6;
+      --text: #f3f4f6;
+      --tile: 44px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* Transparent to the pointer except on the tiles themselves, so the strip does
+       not swallow clicks meant for whatever is behind it. */
+    html, body {
+      pointer-events: none;
+      background: transparent;
+      height: 100%;
+    }
+
+    body {
+      color: var(--text);
+      font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+      font-size: 12px;
+      -webkit-user-select: none;
+      user-select: none;
+      overflow: hidden;
+    }
+
+    .dock {
+      width: 64px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 0;
+      background: var(--bg);
+      backdrop-filter: blur(18px) saturate(140%);
+      border-right: 1px solid rgba(255, 255, 255, 0.07);
+      overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-width: none;
+    }
+    .dock::-webkit-scrollbar { width: 0; }
+
+    .sep {
+      width: 28px;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.12);
+      flex: 0 0 auto;
+      margin: 2px 0;
+    }
+
+    .tile {
+      pointer-events: auto;
+      position: relative;
+      width: var(--tile);
+      height: var(--tile);
+      flex: 0 0 auto;
+      border-radius: 10px;
+      border: none;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text);
+      font-size: 17px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 120ms ease, transform 120ms ease;
+    }
+    .tile:hover { background: rgba(255, 255, 255, 0.15); transform: scale(1.06); }
+    .tile:active { transform: scale(0.97); }
+
+    /* Running indicator: a dot rather than a badge, so the strip stays quiet. */
+    .tile.running::after {
+      content: '';
+      position: absolute;
+      bottom: 3px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.55);
+    }
+    .tile.active::after { background: var(--accent); width: 5px; height: 5px; }
+    .tile.active { background: rgba(59, 130, 246, 0.18); }
+
+    .tile-label {
+      pointer-events: none;
+      position: absolute;
+      left: calc(100% + 10px);
+      white-space: nowrap;
+      font-size: 12px;
+      padding: 4px 9px;
+      border-radius: 6px;
+      background: rgba(16, 18, 22, 0.96);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      opacity: 0;
+      transition: opacity 120ms ease;
+      z-index: 10;
+    }
+    .tile:hover .tile-label { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="dock" id="dock"></div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

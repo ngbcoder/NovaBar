@@ -16,16 +16,23 @@ Go 1.22+ to build. No other dependencies.
 
 ## Status
 
-Milestones 1–3 are complete, and the M4 UI layer is working end to end.
+Milestones 1–4 are complete. Milestone 5 is partial.
 
-The bar is a live WebView2 surface hosted inside the shell's own AppBar window, talking
-to the daemon over the authenticated JSON-RPC interface. Verified: the surface attaches,
-the environment starts, the widget loads from the loopback listener, connects back, and
-subscribes to its topics.
+Three surfaces are live, all WebView2 hosted inside the shell's own windows and all
+talking to the daemon over authenticated, permission-checked JSON-RPC:
 
-Not built yet: the dock and launcher overlay surfaces, widget manifest permission
-enforcement, and the GSMTC media bridge (the bar's media area works but stays hidden
-until real media data exists).
+| Surface | Kind | Widget |
+| --- | --- | --- |
+| Bar | AppBar, reserves work area | `widgets/bar` |
+| Dock | AppBar, reserves work area | `widgets/dock` |
+| Launcher | Overlay, reserves nothing | `widgets/launcher` |
+
+Verified together on a two-bar layout: both surfaces attach, connect, receive only the
+permissions their manifests declare, and subscribe to their topics.
+
+Still to do: the GSMTC media bridge (the bar's transport controls work but the media area
+stays hidden until real media data exists) and app pinning for the dock, which currently
+shows only running windows.
 
 ## Safety
 
@@ -154,7 +161,8 @@ internal/rpc      token-authenticated JSON-RPC over loopback WebSocket + control
 internal/launcher Start Menu + PATH indexing, ranked search, validated launch
 internal/hotkey   global hotkey registration
 internal/watchdog detached recovery process
-internal/webview  WebView2 surfaces hosted in the bar windows, widget loading
+internal/webview  WebView2 surfaces hosted in the shell's own windows
+internal/overlay  transient surfaces that reserve no work area (the launcher)
 internal/media    GSMTC seam (bridge not implemented; reports unavailable honestly)
 ```
 
@@ -184,6 +192,39 @@ contains no credentials. `sdk/novabar.js` is served from `/sdk` and imported dir
 Widget assets are served without the session token: they are static presentation with
 no secrets in them, and the token arrives at runtime instead.
 
+### Widget permissions
+
+A widget's `manifest.json` declares what it needs, and the daemon enforces it on every
+call and every subscription:
+
+```json
+{ "permissions": ["windows.read", "workspaces.manage", "media.control"] }
+```
+
+Available: `windows.read`, `windows.control`, `workspaces.manage`, `launcher.use`,
+`media.control`, `config.read`.
+
+Enforcement uses a **per-surface credential**, distinct from the session token. The
+session token proves a page belongs to this shell; the credential proves which surface
+it is and therefore what that surface's manifest was granted. The session token alone
+calls nothing.
+
+An unknown permission in a manifest is rejected and the widget is denied everything,
+rather than the entry being silently ignored. A method with no permission mapping is not
+callable by widgets at all, so adding one later is inaccessible until someone decides
+what it should require.
+
+### Layout geometry
+
+Bar rectangles are computed by the shell, not taken from the system's work area, and
+adjacent edges are inset so they never overlap. A horizontal bar keeps the full width and
+owns the corner; a vertical bar starts below or beside it. Insetting both, which was the
+first attempt, left a dead square belonging to neither bar.
+
+Surfaces track their bar's real rectangle, not its thickness. A left dock is narrow and
+full height; sizing it to thickness-squared renders a small square in the top-left
+corner, on top of the top bar, which reads as a missing dock rather than as a bug.
+
 ### IPC
 
 The RPC server binds an **ephemeral** loopback port and generates a 256-bit session
@@ -206,8 +247,8 @@ sdk.subscribe("windows.updated", onWindows);
 | --- | --- |
 | M1 Win32 core, safety foundations | Done |
 | M2 Pure-function tiling engine | Done |
-| M3 AppBar, workspaces, taskbar management | Done (multi-bar) |
-| M4 WebView2 UI, widget platform | Bar surface done; dock, launcher and manifest permissions remain |
+| M3 AppBar, workspaces, taskbar management | Done (multi-bar, multi-edge) |
+| M4 WebView2 UI, widget platform | Done (bar, dock, launcher, manifest permissions) |
 | M5 App launcher, GSMTC media | Partial (launcher done; media bridge not implemented) |
 
 ### Open risk: WebView2 vs. the no-cgo constraint — **resolved**

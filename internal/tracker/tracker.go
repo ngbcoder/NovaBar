@@ -10,15 +10,19 @@ import (
 )
 
 // WindowInfo encapsulates window state tracked by the daemon.
+//
+// JSON tags are explicit because widgets consume this directly. Without them encoding
+// would emit the Go field names, and a widget asking for `title` would silently get
+// undefined while the field sat right there as "Title".
 type WindowInfo struct {
-	HWnd      windows.HWND
-	PID       uint32
-	ProcName  string
-	Title     string
-	ClassName string
-	Rect      win.RECT
-	IsCloaked bool
-	IsVisible bool
+	HWnd      windows.HWND `json:"hwnd"`
+	PID       uint32       `json:"pid"`
+	ProcName  string       `json:"proc_name"`
+	Title     string       `json:"title"`
+	ClassName string       `json:"class_name"`
+	Rect      win.RECT     `json:"rect"`
+	IsCloaked bool         `json:"cloaked"`
+	IsVisible bool         `json:"visible"`
 }
 
 // shellClasses are top-level windows that belong to the Windows shell. They must

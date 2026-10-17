@@ -146,7 +146,8 @@ func (m *Manager) Apply(specs []Spec) []error {
 
 // UpdatePosition re-applies the work-area reservation for every bar.
 //
-// Called when the display resolution changes or a monitor is added or removed.
+// Called when the display resolution changes or a monitor is added or removed. Also
+// recomputes each bar's rectangle, because a resolution change moves every edge.
 func (m *Manager) UpdatePosition() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -160,7 +161,12 @@ func (m *Manager) UpdatePosition() {
 	for _, edge := range edges {
 		m.bars[edge].UpdatePosition()
 	}
+	m.recomputeRectsLocked(screenWidth(), screenHeight())
 }
+
+// screenWidth and screenHeight read the primary display size.
+func screenWidth() int32  { return win.GetSystemMetrics(0) }
+func screenHeight() int32 { return win.GetSystemMetrics(1) }
 
 // UnregisterAll tears down every bar. Safe on a nil or empty manager.
 func (m *Manager) UnregisterAll() {
@@ -257,6 +263,130 @@ func (m *Manager) WorkArea(screen Rect) Rect {
 		area = subtractEdge(area, r)
 	}
 	return area
+}
+
+// RecomputeRects reassigns every bar's rectangle so adjacent edges do not overlap.
+//
+// Without this a top bar claims (0,0)-(1920,44) and a left bar claims
+// (0,0)-(64,1080), and the two fight over the top-left corner: the left bar's content
+// is drawn underneath the top bar's, which is exactly what a dock that appears not to
+// exist looks like.
+//
+// Each bar is placed against the screen with every *other* bar's thickness already
+// removed, so the corner belongs to whichever bar registered first and the others start
+// past it. Idempotent, and safe to call on every change.
+func (m *Manager) RecomputeRects(screenW, screenH int32) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.recomputeRectsLocked(screenW, screenH)
+}
+
+// recomputeRectsLocked is RecomputeRects with the lock already held.
+func (m *Manager) recomputeRectsLocked(screenW, screenH int32) {
+	if screenW <= 0 || screenH <= 0 {
+		screenW, screenH = 1920, 1080
+	}
+
+	screen := Rect{Left: 0, Top: 0, Right: screenW, Bottom: screenH}
+
+	// Thickness of each edge, taken from whichever bar owns it.
+	thickness := map[uint32]int32{}
+	for edge, ab := range m.bars {
+		if !ab.Registered() {
+			continue
+		}
+		thickness[edge] = ab.Size()
+	}
+
+	// Deterministic order so two runs from the same state agree on which bar gets the
+	// contested corner.
+	edges := make([]uint32, 0, len(thickness))
+	for edge := range thickness {
+		edges = append(edges, edge)
+	}
+	sort.Slice(edges, func(i, j int) bool { return edges[i] < edges[j] })
+
+	for _, edge := range edges {
+		ab := m.bars[edge]
+		if ab == nil || !ab.Registered() {
+			continue
+		}
+
+		// Only perpendicular bars cause the corner problem, and only one of the two
+		// should pay for it.
+		//
+		// A horizontal bar keeps the full width and owns the corner; a vertical bar
+		// starts below or beside it. Symmetric exclusion, which was the first attempt,
+		// inset both and left a 64x40 hole belonging to neither bar, which is worse than
+		// an overlap because it is visible as a dead square.
+		area := screen
+		for _, other := range edges {
+			if other == edge || !isPerpendicular(edge, other) {
+				continue
+			}
+			// Horizontal wins the corner.
+			if isHorizontal(edge) {
+				continue
+			}
+			area = subtractEdge(area, edgeRect(other, screen, thickness[other]))
+		}
+
+		ab.SetRequestedRect(toWinRect(inflateTowardEdge(area, edge, thickness[edge])))
+	}
+}
+
+// isHorizontal reports whether an edge runs left to right.
+func isHorizontal(edge uint32) bool {
+	return edge == win.ABE_TOP || edge == win.ABE_BOTTOM
+}
+
+// isPerpendicular reports whether two edges meet at a corner.
+func isPerpendicular(a, b uint32) bool {
+	return isHorizontal(a) != isHorizontal(b)
+}
+
+// toWinRect converts an internal Rect to the native RECT the window APIs take.
+func toWinRect(r Rect) win.RECT {
+	return win.RECT{Left: r.Left, Top: r.Top, Right: r.Right, Bottom: r.Bottom}
+}
+
+// edgeRect builds the strip a bar of the given thickness would occupy on an edge.
+func edgeRect(edge uint32, screen Rect, thickness int32) Rect {
+	return inflateTowardEdge(screen, edge, thickness)
+}
+
+// inflateTowardEdge grows a rectangle from one edge of itself by thickness.
+func inflateTowardEdge(area Rect, edge uint32, thickness int32) Rect {
+	if area.Width() <= 0 || area.Height() <= 0 {
+		return area
+	}
+
+	r := area
+	switch edge {
+	case win.ABE_TOP:
+		r.Bottom = minInt32(r.Top+thickness, r.Bottom)
+	case win.ABE_BOTTOM:
+		r.Top = maxInt32(r.Bottom-thickness, r.Top)
+	case win.ABE_LEFT:
+		r.Right = minInt32(r.Left+thickness, r.Right)
+	case win.ABE_RIGHT:
+		r.Left = maxInt32(r.Right-thickness, r.Left)
+	}
+	return r
+}
+
+func minInt32(a, b int32) int32 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt32(a, b int32) int32 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // subtractEdge removes the overlap between area and an edge-anchored bar.

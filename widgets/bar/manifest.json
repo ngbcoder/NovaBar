@@ -6,7 +6,7 @@
   "permissions": [
     "windows.read",
     "workspaces.manage",
-    "system.clock"
+    "media.control"
   ],
   "window": {
     "kind": "bar",
