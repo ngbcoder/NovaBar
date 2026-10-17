@@ -43,9 +43,9 @@ type MediaSession struct {
 	Position float64 `json:"position"`
 	Duration float64 `json:"duration"`
 
-	CanPlay    bool `json:"can_play"`
-	CanPause   bool `json:"can_pause"`
-	CanNext    bool `json:"can_next"`
+	CanPlay     bool `json:"can_play"`
+	CanPause    bool `json:"can_pause"`
+	CanNext     bool `json:"can_next"`
 	CanPrevious bool `json:"can_previous"`
 
 	// Source is "gsmtc" when reported by a real Windows media session, or "none"

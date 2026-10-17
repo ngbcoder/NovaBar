@@ -41,7 +41,7 @@ type daemon struct {
 	watcher *config.Watcher
 
 	taskbars *win.TaskbarState
-	appbar   *bar.AppBarManager
+	bars     *bar.Manager
 	trk      *tracker.WindowTracker
 	engine   *tiling.Engine
 	spaces   *workspace.Manager
@@ -81,12 +81,22 @@ func Run() {
 
 	d := &daemon{
 		taskbars: win.NewTaskbarState(),
+		bars:     bar.NewManager(),
 		trk:      tracker.NewWindowTracker(),
 		spaces:   workspace.NewManager(),
 	}
 	// Capture the pump thread before anything can signal us, so an early Ctrl+C still
 	// reaches the message loop.
 	d.pumpThread = windows.GetCurrentThreadId()
+
+	// Windows 11 only. Logged rather than refused: an unsupported build may still work,
+	// and hard-failing a shell would be worse than the risk. The check exists so a
+	// Windows 10 user gets a clear explanation instead of mysterious failures.
+	if version, err := win.GetOsVersion(); err != nil {
+		log.Printf("[NovaBar] Could not read the Windows version: %v\n", err)
+	} else if reason := version.UnsupportedReason(); reason != "" {
+		log.Printf("[NovaBar] WARNING: %s\n", reason)
+	}
 
 	if err := d.setup(); err != nil {
 		log.Printf("[NovaBar] Fatal during setup: %v", err)
@@ -119,7 +129,7 @@ func Run() {
 	d.pump()
 	d.teardown()
 }
-//
+
 // Ordering is load-bearing. The watchdog, the IPC control channel and the hotkeys all
 // come up before anything that can block or interfere with the desktop, because they
 // are the user's way out. Onboarding in particular used to run first and could hold
@@ -154,7 +164,12 @@ func (d *daemon) setup() error {
 
 	// Hide the native taskbars only when configured to. The default is off precisely
 	// so a fresh install cannot strand a user with no way back.
-	if d.cfg.Bar.HideTaskbar {
+	//
+	// This runs before applyBars deliberately: hiding the taskbar has to land first,
+	// because TaskbarState.Hide forces the shell to recompute the work area, and a
+	// bottom bar asking for space the shell still believes the taskbar owns is refused
+	// with nothing granted.
+	if d.cfg.General.HideTaskbar {
 		if err := d.taskbars.Hide(); err != nil {
 			log.Printf("[NovaBar] Warning hiding taskbars: %v\n", err)
 		} else {
@@ -165,17 +180,7 @@ func (d *daemon) setup() error {
 		win.ForceRestoreTaskbar()
 	}
 
-	if d.cfg.Bar.Enabled {
-		edge := uint32(win.ABE_TOP)
-		if d.cfg.Bar.Position == "bottom" {
-			edge = uint32(win.ABE_BOTTOM)
-		}
-		d.appbar = bar.NewAppBarManager(edge, int32(d.cfg.Bar.Height))
-		if err := d.appbar.CreateAndRegister(); err != nil {
-			log.Printf("[NovaBar] Warning: could not register AppBar: %v\n", err)
-			d.appbar = nil
-		}
-	}
+	d.applyBars(d.cfg)
 
 	// Indexing the Start Menu and PATH takes a few hundred milliseconds; do it off
 	// the pump thread so the first frame is not delayed.
@@ -225,6 +230,63 @@ func (d *daemon) setup() error {
 	return nil
 }
 
+// applyBars reconciles the live AppBars against the configured set.
+//
+// Enables and disables bars from config.toml without a restart, which is the point of
+// holding several [[bars]] entries: turning a second bar on is a config edit.
+func (d *daemon) applyBars(cfg config.Config) {
+	specs := make([]bar.Spec, 0, len(cfg.Bars))
+
+	for _, bc := range cfg.Bars {
+		if !bc.Enabled {
+			continue
+		}
+		edge, ok := bar.EdgeForName(bc.Edge)
+		if !ok {
+			log.Printf("[NovaBar] Ignoring bar with unknown edge %q\n", bc.Edge)
+			continue
+		}
+		specs = append(specs, bar.Spec{
+			Edge: edge,
+			Size: int32(bc.Size),
+			Name: bc.Name,
+		})
+	}
+
+	for _, err := range d.bars.Apply(specs) {
+		log.Printf("[NovaBar] %v\n", err)
+	}
+
+	d.warnAboutCollapsedBars()
+
+	log.Printf("[NovaBar] %d bar(s) active\n", d.bars.Count())
+}
+
+// warnAboutCollapsedBars reports bars that registered but reserved no screen space.
+//
+// The common cause is a bottom or side bar while the native taskbar is still visible.
+// The shell gives the real taskbar priority, ABM_QUERYPOS clips the proposal to
+// whatever is left, and the bar ends up registered, invisible, and painted over. It
+// looks exactly like a bug in the bar, so say so plainly.
+func (d *daemon) warnAboutCollapsedBars() {
+	collapsed := d.bars.Collapsed()
+	if len(collapsed) == 0 {
+		return
+	}
+
+	for _, info := range collapsed {
+		switch {
+		case info.Edge == "bottom" && !d.cfg.General.HideTaskbar:
+			log.Printf("[NovaBar] WARNING: the %q bar on the bottom edge is invisible because the native taskbar "+
+				"still occupies that edge. Set [general] hide_taskbar = true, or disable the bottom bar.\n",
+				info.Name)
+		default:
+			log.Printf("[NovaBar] WARNING: the %q bar on the %s edge reserved no space (%dpx requested). "+
+				"Another window may already own that edge.\n", info.Name, info.Edge, info.Size)
+		}
+	}
+}
+
 // teardown restores the desktop. Runs on every exit path, including rescue.
 func (d *daemon) teardown() {
 	log.Println("[NovaBar] Restoring the desktop")
@@ -235,8 +297,8 @@ func (d *daemon) teardown() {
 	if d.watcher != nil {
 		d.watcher.Close()
 	}
-	if d.appbar != nil {
-		d.appbar.Unregister()
+	if d.bars != nil {
+		d.bars.UnregisterAll()
 	}
 	if err := d.taskbars.Show(); err != nil {
 		log.Printf("[NovaBar] Warning restoring taskbars: %v\n", err)
@@ -348,12 +410,15 @@ func (d *daemon) handleHotkey(id uintptr) {
 
 // performRescue restores the desktop and exits.
 //
-// Uses requestQuit rather than calling PostQuitMessage directly: this can be reached
-// from the control goroutine, and PostQuitMessage posts WM_QUIT to the *calling*
-// thread's queue. Calling it off the pump thread leaves the loop spinning forever
-// after cleanup, which is exactly how the first rescue test left an orphaned process.
+// Only requests the quit. Cleanup happens in Run's post-pump teardown, which is the
+// single place it runs, on the pump thread. Doing it here as well meant teardown
+// executed twice and raced itself across two goroutines.
+//
+// Uses requestQuit rather than PostQuitMessage directly: this can be reached from the
+// control goroutine, and PostQuitMessage posts WM_QUIT to the *calling* thread's queue,
+// so calling it off the pump thread leaves the loop spinning forever after cleanup.
 func (d *daemon) performRescue() {
-	d.teardown()
+	log.Println("[NovaBar] Rescue requested; restoring the desktop")
 	d.requestQuit()
 }
 
@@ -381,19 +446,14 @@ func (d *daemon) status() map[string]any {
 	monitorInfo := make([]map[string]any, 0, len(monitors))
 	for i, m := range monitors {
 		monitorInfo = append(monitorInfo, map[string]any{
-			"index":       i,
-			"bounds":      m.Bounds,
-			"work_area":   m.WorkArea,
-			"primary":     m.Primary,
+			"index":     i,
+			"bounds":    m.Bounds,
+			"work_area": m.WorkArea,
+			"primary":   m.Primary,
 		})
 	}
 
-	appbarState := map[string]any{"enabled": d.cfg.Bar.Enabled}
-	if d.appbar != nil {
-		appbarState["registered"] = d.appbar.Registered()
-		appbarState["hwnd"] = uintptr(d.appbar.HWND())
-		appbarState["bounds"] = d.appbar.Bounds()
-	}
+	appbarState := map[string]any{"count": d.bars.Count(), "bars": d.bars.Describe()}
 
 	return map[string]any{
 		"pid":            os.Getpid(),
@@ -408,9 +468,9 @@ func (d *daemon) status() map[string]any {
 		"monitors":        monitorInfo,
 		"launcher_items":  d.indexer.Count(),
 		"media":           d.media.GetCurrentSession(),
-		"hotkeys":        d.hotkeys.Registered(),
-		"watchdog_pid":   d.dog.PID(),
-		"rpc_port":       d.rpcs.Port(),
+		"hotkeys":         d.hotkeys.Registered(),
+		"watchdog_pid":    d.dog.PID(),
+		"rpc_port":        d.rpcs.Port(),
 		"tiling": map[string]any{
 			"enabled": d.cfg.Tiling.Enabled,
 			"layout":  d.cfg.Tiling.DefaultLayout,
@@ -614,35 +674,35 @@ func (d *daemon) eventPump() {
 	events := d.trk.Events()
 
 	timer := time.NewTimer(time.Hour)
-		if !timer.Stop() {
-			<-timer.C
-		}
-		var timerC <-chan time.Time
+	if !timer.Stop() {
+		<-timer.C
+	}
+	var timerC <-chan time.Time
 
-		for {
-			select {
-			case ev := <-events:
-				switch ev.Kind {
-				case tracker.EventForeground:
-					// Focus changes do not change the window set; only publish.
-					d.publishWindows()
-				default:
-					if !timer.Stop() && timerC != nil {
-						select {
-						case <-timer.C:
-						default:
-						}
+	for {
+		select {
+		case ev := <-events:
+			switch ev.Kind {
+			case tracker.EventForeground:
+				// Focus changes do not change the window set; only publish.
+				d.publishWindows()
+			default:
+				if !timer.Stop() && timerC != nil {
+					select {
+					case <-timer.C:
+					default:
 					}
-					timer.Reset(eventDebounce)
-					timerC = timer.C
 				}
-
-			case <-timerC:
-				timerC = nil
-				d.reconcile()
+				timer.Reset(eventDebounce)
+				timerC = timer.C
 			}
+
+		case <-timerC:
+			timerC = nil
+			d.reconcile()
 		}
 	}
+}
 
 // reconcile re-enumerates, re-homes windows, retiles and publishes.
 func (d *daemon) reconcile() {
@@ -730,9 +790,9 @@ func (d *daemon) statsPump() {
 	for range ticker.C {
 		d.rpcs.Broadcast(rpc.TopicSystemStats, map[string]any{
 			"windows_tracked": d.trk.Count(),
-			"workspace":      d.spaces.ActiveID(),
-			"monitors":       len(d.engine.GetMonitors()),
-			"goroutines":     runtime.NumGoroutine(),
+			"workspace":       d.spaces.ActiveID(),
+			"monitors":        len(d.engine.GetMonitors()),
+			"goroutines":      runtime.NumGoroutine(),
 		})
 	}
 }
@@ -758,24 +818,22 @@ func (d *daemon) configPump() {
 		d.engine.SetConfig(cfg)
 		d.engine.DetectMonitors()
 
-		if d.appbar != nil {
-			if cfg.Bar.Position == "bottom" && d.appbar.Edge() != uint32(win.ABE_BOTTOM) {
-				log.Println("[NovaBar] Bar position changed; restart required to move the AppBar edge")
-			}
-			d.appbar.UpdatePosition()
-		}
-
-		// Hotkeys are owned by the pump thread; rebinding here would register against
-		// the wrong thread, so this takes effect on next start.
-		if cfg.Bar.HideTaskbar && !d.taskbars.IsHidden() {
+		// Adding, removing or resizing bars takes effect immediately; this is the
+		// whole point of holding several [[bars]] entries in config.
+		//
+		// Taskbar visibility is applied first so the shell has recomputed the work area
+		// before the bars ask it for space.
+		if cfg.General.HideTaskbar && !d.taskbars.IsHidden() {
 			if err := d.taskbars.Hide(); err != nil {
 				log.Printf("[NovaBar] Could not hide taskbars on config reload: %v\n", err)
 			}
-		} else if !cfg.Bar.HideTaskbar && d.taskbars.IsHidden() {
+		} else if !cfg.General.HideTaskbar && d.taskbars.IsHidden() {
 			if err := d.taskbars.Show(); err != nil {
 				log.Printf("[NovaBar] Could not restore taskbars on config reload: %v\n", err)
 			}
 		}
+
+		d.applyBars(cfg)
 
 		d.retile()
 		d.publishWindows()

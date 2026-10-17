@@ -30,15 +30,22 @@ var validActions = map[string]bool{
 type Config struct {
 	General GeneralConfig `toml:"general"`
 	Tiling  TilingConfig  `toml:"tiling"`
-	Bar     BarConfig     `toml:"bar"`
+	Bars    []BarConfig   `toml:"bars"`
 	Hotkeys HotkeyConfig  `toml:"hotkeys"`
 	Rules   []RuleConfig  `toml:"rules"`
 }
 
 type GeneralConfig struct {
-	FirstRun  bool   `toml:"first_run"`
-	LogLevel  string `toml:"log_level"`
+	FirstRun bool   `toml:"first_run"`
+	LogLevel string `toml:"log_level"`
+	// RescueKey is kept in sync with Hotkeys.Rescue; see DefaultConfig.
 	RescueKey string `toml:"rescue_hotkey"`
+	// HideTaskbar hides the native Windows taskbar.
+	//
+	// Global rather than per-bar because it is one action on one shell object, not a
+	// property of any individual bar. Two bars each asking to hide it would be
+	// meaningless.
+	HideTaskbar bool `toml:"hide_taskbar"`
 }
 
 type TilingConfig struct {
@@ -48,11 +55,18 @@ type TilingConfig struct {
 	OuterGap      int    `toml:"outer_gap"`
 }
 
+// BarConfig is one AppBar. Multiple bars may be enabled simultaneously, at most one
+// per screen edge: the AppBar API reserves a single strip per edge, so two bars on the
+// same edge would fight over the work area.
 type BarConfig struct {
-	Enabled     bool   `toml:"enabled"`
-	Position    string `toml:"position"` // "top" or "bottom"
-	Height      int    `toml:"height"`
-	HideTaskbar bool   `toml:"hide_taskbar"`
+	// Edge is "top", "bottom", "left" or "right".
+	Edge string `toml:"edge"`
+	// Size is the reserved thickness: vertical extent for top and bottom bars,
+	// horizontal extent for left and right bars.
+	Size    int  `toml:"size"`
+	Enabled bool `toml:"enabled"`
+	// Name is a free-form label for status output and future per-bar styling.
+	Name string `toml:"name"`
 }
 
 // HotkeyConfig holds the global hotkey bindings as config strings, e.g. "Win+Space".
@@ -78,9 +92,10 @@ type RuleConfig struct {
 func DefaultConfig() Config {
 	return Config{
 		General: GeneralConfig{
-			FirstRun:  true,
-			LogLevel:  "info",
-			RescueKey: "Ctrl+Alt+Shift+R",
+			FirstRun:    true,
+			LogLevel:    "info",
+			RescueKey:   "Ctrl+Alt+Shift+R",
+			HideTaskbar: false,
 		},
 		Tiling: TilingConfig{
 			Enabled:       true,
@@ -88,11 +103,10 @@ func DefaultConfig() Config {
 			InnerGap:      8,
 			OuterGap:      12,
 		},
-		Bar: BarConfig{
-			Enabled:     true,
-			Position:    "top",
-			Height:      40,
-			HideTaskbar: false,
+		// One top bar out of the box. Users can enable more from config.toml by
+		// adding further [[bars]] entries, at most one per edge.
+		Bars: []BarConfig{
+			{Edge: "top", Size: 40, Enabled: true, Name: "main"},
 		},
 		Hotkeys: HotkeyConfig{
 			Rescue:        "Ctrl+Alt+Shift+R",
@@ -187,8 +201,8 @@ func SafeConfig() Config {
 	cfg := DefaultConfig()
 
 	// Nothing takes over the desktop.
-	cfg.Bar.Enabled = false
-	cfg.Bar.HideTaskbar = false
+	cfg.Bars = []BarConfig{}
+	cfg.General.HideTaskbar = false
 	cfg.Tiling.Enabled = false
 
 	// But the recovery paths stay live, because those are what protect the user.
@@ -233,21 +247,8 @@ func Validate(cfg *Config) error {
 		cfg.Tiling.OuterGap = 200
 	}
 
-	pos := strings.ToLower(strings.TrimSpace(cfg.Bar.Position))
-	switch pos {
-	case "top":
-		cfg.Bar.Position = "top"
-	case "bottom":
-		cfg.Bar.Position = "bottom"
-	default:
-		return fmt.Errorf("bar.position %q must be \"top\" or \"bottom\"", cfg.Bar.Position)
-	}
-
-	if cfg.Bar.Height <= 0 {
-		cfg.Bar.Height = 40
-	}
-	if cfg.Bar.Height > 400 {
-		return fmt.Errorf("bar.height %d is implausible; expected 1..400", cfg.Bar.Height)
+	if err := validateBars(cfg.Bars); err != nil {
+		return err
 	}
 
 	for i := range cfg.Rules {
@@ -262,6 +263,48 @@ func Validate(cfg *Config) error {
 		cfg.Rules[i].Action = action
 	}
 
+	return nil
+}
+
+// Valid screen edges for a bar.
+var validEdges = map[string]bool{
+	"top":    true,
+	"bottom": true,
+	"left":   true,
+	"right":  true,
+}
+
+// validateBars normalizes and checks the bar list in place.
+//
+// The important rule is one bar per edge. The AppBar API reserves a single strip per
+// screen edge, so two bars claiming the same edge would each shrink the work area from
+// the same side and leave the user with a gap that is twice as large as either bar.
+func validateBars(bars []BarConfig) error {
+	seen := make(map[string]int, len(bars))
+
+	for i := range bars {
+		edge := strings.ToLower(strings.TrimSpace(bars[i].Edge))
+		if edge == "" {
+			edge = "top"
+		}
+		if !validEdges[edge] {
+			return fmt.Errorf("bars[%d].edge %q must be one of top, bottom, left, right", i, bars[i].Edge)
+		}
+		bars[i].Edge = edge
+
+		if first, dup := seen[edge]; dup {
+			return fmt.Errorf("bars[%d] duplicates the %q edge already used by bars[%d]; "+
+				"at most one bar per screen edge is allowed", i, edge, first)
+		}
+		seen[edge] = i
+
+		if bars[i].Size <= 0 {
+			bars[i].Size = 40
+		}
+		if bars[i].Size > 400 {
+			return fmt.Errorf("bars[%d].size %d is implausible; expected 1..400", i, bars[i].Size)
+		}
+	}
 	return nil
 }
 

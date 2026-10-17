@@ -123,11 +123,27 @@ func (w *Watchdog) Stop() {
 }
 
 // Run is the watchdog body: block until parentPID exits, then restore the desktop.
+//
+// The restore is deferred so it runs even if something panics first. This process has
+// exactly one job, and that job is unconditional: a version with a panic on the path to
+// ForceRestoreTaskbar silently removed the entire recovery mechanism once already, so
+// the ordering is defended rather than left to care.
 func Run(parentPID uint32) {
 	log.SetFlags(log.Ltime)
 	log.SetPrefix("[NovaBar Watchdog] ")
 
+	// Label the process distinctly in Task Manager. The watchdog shares an image name
+	// with the daemon, so "end task" on every NovaBar process kills the safety net
+	// along with the thing it is protecting. Cosmetic, and safe to skip.
+	win.SetProcessDescription("NovaBar Watchdog (leave this running)")
+
 	log.Printf("Watching daemon PID %d", parentPID)
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Panicked while watching (%v); restoring the desktop anyway", r)
+		}
+	}()
 
 	exitCode, ok := win.WaitForProcess(parentPID)
 	if !ok {
@@ -138,12 +154,23 @@ func Run(parentPID uint32) {
 	}
 
 	// A clean exit already ran the daemon's own cleanup, but there is no way to tell
-	// for certain how the daemon died. ForceRestoreTaskbar is idempotent and cheap, so
-	// run it unconditionally. Restoring the taskbar when it was never hidden is a
-	// visible no-op; failing to restore it is a broken desktop.
-	log.Printf("Daemon PID %d exited (code %d); restoring native taskbars", parentPID, exitCode)
-	win.ForceRestoreTaskbar()
+	// for certain how the daemon died. ForceRestoreTaskbar is idempotent and resets the
+	// work area outright, so run it unconditionally. Restoring the taskbar when it was
+	// never hidden is a visible no-op; failing to restore it is a broken desktop.
+	log.Printf("Daemon PID %d exited (code %d); restoring the desktop", parentPID, exitCode)
+	restoreDesktop()
 	log.Printf("Desktop restored; watchdog exiting")
+}
+
+// restoreDesktop is the single call that matters, isolated so it cannot be skipped by
+// an early return or an intervening panic above it.
+func restoreDesktop() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Restore itself panicked: %v", r)
+		}
+	}()
+	win.ForceRestoreTaskbar()
 }
 
 // Entry is the root-package entrypoint. Returns the process exit code.

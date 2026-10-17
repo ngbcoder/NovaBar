@@ -46,7 +46,11 @@ func (ts *TaskbarState) Find() error {
 	return nil
 }
 
-// Hide hides all identified taskbar windows.
+// Hide hides all identified taskbar windows and forces the work area to be recomputed.
+//
+// The refresh is what makes a bottom AppBar possible. ShowWindow(SW_HIDE) alone leaves
+// the shell's cached work area unchanged, so the strip the taskbar occupied stays
+// excluded and a bottom bar asking for it is refused with nothing granted.
 func (ts *TaskbarState) Hide() error {
 	if ts.primary == 0 {
 		if err := ts.Find(); err != nil {
@@ -54,16 +58,28 @@ func (ts *TaskbarState) Hide() error {
 		}
 	}
 
+	// Capture the pre-hide work area so the refresh can be waited on.
+	before, _ := PrimaryWorkArea()
+
 	ShowWindow(ts.primary, SW_HIDE)
 	for _, sec := range ts.secondary {
 		ShowWindow(sec, SW_HIDE)
 	}
 	ts.hidden = true
+
+	RefreshWorkArea()
+	if after, settled := WorkAreaAfterInsets(before); settled {
+		log.Printf("[NovaBar Taskbar] Taskbars hidden; work area grew from %d to %d\n", before, after)
+	} else {
+		log.Printf("[NovaBar Taskbar] Taskbars hidden; work area unchanged at %d\n", before)
+	}
 	return nil
 }
 
-// Show restores visibility to all taskbar windows.
+// Show restores visibility to all taskbar windows and refreshes the work area.
 func (ts *TaskbarState) Show() error {
+	before, _ := PrimaryWorkArea()
+
 	// Re-find in case handles changed across a monitor or shell restart.
 	_ = ts.Find()
 
@@ -74,6 +90,11 @@ func (ts *TaskbarState) Show() error {
 		ShowWindow(sec, SW_SHOW)
 	}
 	ts.hidden = false
+
+	RefreshWorkArea()
+	if after, settled := WorkAreaAfterInsets(before); settled {
+		log.Printf("[NovaBar Taskbar] Taskbars restored; work area is now %d\n", after)
+	}
 	return nil
 }
 
@@ -82,12 +103,19 @@ func (ts *TaskbarState) IsHidden() bool {
 	return ts.hidden
 }
 
-// ForceRestoreTaskbar provides a direct, unmanaged rescue restore of the taskbar.
+// ForceRestoreTaskbar is the last line of defence: it restores the taskbar and forces
+// the whole work area back, without needing the daemon or trusting any cached state.
 //
-// This is the last line of defence: it does not require the daemon to be running and
-// does not touch AppBar registration. It deliberately re-finds the taskbar from
-// scratch rather than trusting cached handles, because the caller is usually a
-// recovery path invoked precisely when cached state is suspect.
+// This is what runs in the recovery path, so it does everything rather than the minimum:
+//   - re-shows the taskbar, found from scratch rather than a cached handle
+//   - calls RestoreFullWorkArea, which is the only thing that clears a stale AppBar
+//     reservation left behind by a process that was killed without running its cleanup
+//   - nudges the shell into a layout pass and broadcasts the change to applications
+//
+// Callers are the watchdog and `shellctl --rescue`. Running the taskbar again is
+// harmless when it was never hidden, so it is unconditional: restoring a desktop that
+// did not need it costs nothing, and failing to restore one that did is unrecoverable
+// without a reboot.
 func ForceRestoreTaskbar() {
 	if h, err := FindWindow("Shell_TrayWnd", ""); err == nil && h != 0 {
 		ShowWindow(h, SW_SHOW)
@@ -101,6 +129,15 @@ func ForceRestoreTaskbar() {
 	EnumWindows(0)
 	ClearEnumWindowsHandler()
 
+	// Absolute reset of the work area. This is the step that matters: without it a
+	// desktop left shrunk by a dead process's AppBar registration stays shrunk.
+	if err := RestoreFullWorkArea(); err != nil {
+		log.Printf("[NovaBar Taskbar] WARNING: could not reset the work area: %v\n", err)
+	} else {
+		log.Println("[NovaBar Taskbar] Work area reset to the full primary display.")
+	}
+
+	RefreshWorkArea()
 	log.Println("[NovaBar Taskbar] Force-restored native taskbars.")
 }
 

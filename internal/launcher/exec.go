@@ -12,10 +12,10 @@ import (
 
 // Validation errors surfaced to RPC callers.
 var (
-	errEmptyTarget           = errors.New("launch target is empty")
-	errTargetTooLong         = errors.New("launch target exceeds the Windows MAX_PATH limit")
-	errMetacharacter         = errors.New("launch target contains shell metacharacters")
-	errUnsupportedExtension  = errors.New("launch target has an unsupported extension")
+	errEmptyTarget          = errors.New("launch target is empty")
+	errTargetTooLong        = errors.New("launch target exceeds the Windows MAX_PATH limit")
+	errMetacharacter        = errors.New("launch target contains shell metacharacters")
+	errUnsupportedExtension = errors.New("launch target has an unsupported extension")
 )
 
 // Launch runs an application by target.

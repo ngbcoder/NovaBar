@@ -24,14 +24,34 @@ func main() {
 		timeout  = flag.Duration("timeout", controlTimeout, "How long to wait for the daemon to respond")
 	)
 	flag.Usage = usage
-	flag.Parse()
+
+	// Split verbs out of argv before parsing.
+	//
+	// Go's flag package stops at the first non-flag argument, so `shellctl status
+	// --json` would leave "--json" sitting unparsed in Args() and silently ignore it.
+	// Since the verbs are the primary form and users will type flags after them, they
+	// have to be removed first for the flags to be seen at all.
+	verbs, flags := splitVerbs(os.Args[1:])
+	if err := flag.CommandLine.Parse(flags); err != nil {
+		os.Exit(2)
+	}
 
 	// Accept bare verbs as well as flags. `shellctl status` is what people type;
 	// requiring `shellctl --status` is a papercut in a tool whose whole job is to be
 	// reachable under stress.
-	*rescue = *rescue || hasVerb("rescue")
-	*status = *status || hasVerb("status")
-	*shutdown = *shutdown || hasVerb("shutdown")
+	for _, v := range verbs {
+		switch strings.ToLower(v) {
+		case "rescue":
+			*rescue = true
+		case "status":
+			*status = true
+		case "shutdown":
+			*shutdown = true
+		case "help":
+			usage()
+			os.Exit(0)
+		}
+	}
 
 	switch {
 	case *rescue:
@@ -46,14 +66,25 @@ func main() {
 	}
 }
 
-// hasVerb reports whether a positional argument matches one of the commands.
-func hasVerb(verb string) bool {
-	for _, arg := range flag.Args() {
-		if strings.EqualFold(arg, verb) {
-			return true
+// verbs are the bare command words recognized without a leading dash.
+var verbs = []string{"rescue", "status", "shutdown", "help"}
+
+// splitVerbs separates bare command words from flags, preserving order.
+func splitVerbs(args []string) (found []string, rest []string) {
+	for _, arg := range args {
+		matched := false
+		for _, v := range verbs {
+			if strings.EqualFold(arg, v) {
+				found = append(found, v)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			rest = append(rest, arg)
 		}
 	}
-	return false
+	return found, rest
 }
 
 func usage() {
@@ -182,8 +213,26 @@ func printHuman(data any) {
 	if tiling, ok := m["tiling"].(map[string]any); ok {
 		fmt.Printf("  Tiling            %v (layout: %v)\n", tiling["enabled"], tiling["layout"])
 	}
+
 	if appbar, ok := m["appbar"].(map[string]any); ok {
-		fmt.Printf("  AppBar            enabled=%v registered=%v\n", appbar["enabled"], appbar["registered"])
+		fmt.Printf("  Bars              %v active\n", appbar["count"])
+		if bars, ok := appbar["bars"].([]any); ok {
+			for _, raw := range bars {
+				b, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				// Report what the shell actually reserved, not what was asked for. A bar
+				// can be registered and still invisible.
+				granted := b["granted"]
+				note := ""
+				if g, _ := granted.(float64); g == 0 {
+					note = "  <-- INVISIBLE: no space reserved"
+				}
+				fmt.Printf("    %-10v %-6v requested=%-4v granted=%-4v%s\n",
+					b["name"], b["edge"], b["size"], granted, note)
+			}
+		}
 	}
 	if ws, ok := m["workspace"].(map[string]any); ok {
 		fmt.Printf("  Active workspace  %v\n", ws["active"])

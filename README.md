@@ -1,14 +1,25 @@
 # NovaBar
 
-A lightweight desktop shell and tiling window manager for Windows 10 and 11, written
-in pure Go. No cgo, no UAC elevation, single binary.
+A lightweight desktop shell and tiling window manager for **Windows 11**, written in
+pure Go. No cgo, no UAC elevation, single binary.
+
+## Requirements
+
+Windows 11 (build 22000 or newer).
+
+This is a deliberate scope decision. Windows 11 guarantees the WebView2 runtime is
+present, which means the M4 UI layer needs no bundled `WebView2Loader.dll` and no
+fallback path. On startup the daemon logs a clear warning if it detects an older build,
+rather than failing mysteriously later.
+
+Go 1.22+ to build. No other dependencies.
 
 ## Status
 
 Milestone 1.5 (Safety & Correctness) complete. See [Roadmap](#roadmap).
 
 The daemon, tiling engine, IPC, config, launcher and CLI work. The WebView2 UI
-surfaces (bar, dock, launcher overlay) are **not** built yet — the bar currently
+surfaces (bar, dock, launcher overlay) are **not** built yet — each bar currently
 reserves its space with a plain Win32 AppBar window and nothing is drawn in it.
 
 ## Safety
@@ -62,9 +73,53 @@ first run. It is watched live; saving the file re-applies the settings without a
 restart. A malformed edit is reported and the previous config stays in force — a typo
 can never take the shell down mid-edit.
 
-If the config cannot be parsed at startup, NovaBar runs **inert** (no AppBar, no
-tiling) rather than falling back to a fully featured shell. Unreadable config is not
-permission to take over the screen.
+If the config cannot be parsed at startup, NovaBar runs **inert** (no bars, no tiling)
+rather than falling back to a fully featured shell. Unreadable config is not permission
+to take over the screen.
+
+### Bars
+
+Any number of bars may be enabled, **at most one per screen edge**:
+
+```toml
+[[bars]]
+edge = "top"      # top | bottom | left | right
+size = 40         # reserved thickness
+enabled = true
+name = "main"
+
+[[bars]]
+edge = "bottom"
+size = 6
+enabled = true
+name = "status"
+
+[[bars]]
+edge = "left"
+size = 64
+enabled = false   # present but off; flip to true to add a dock
+name = "dock"
+```
+
+`size` is the vertical extent for top and bottom bars, the horizontal extent for left
+and right. Adding, enabling, disabling or resizing a bar takes effect on the next save,
+with no restart.
+
+One bar per edge is a hard rule, enforced at load. The AppBar API reserves a single
+strip per edge, so two bars on the same edge would each shrink the work area from the
+same side and leave a gap twice as large as either bar.
+
+`hide_taskbar` is a single global setting under `[general]`, not per bar — it is one
+action on one shell object, so asking two bars to do it would be meaningless.
+
+To hide the native taskbar and draw your own, add:
+
+```toml
+[general]
+hide_taskbar = true
+```
+
+That is the one setting the watchdog exists to recover from.
 
 ## CLI
 
@@ -87,7 +142,7 @@ cmd/shellctl      control CLI
 internal/win      Win32 bindings; every callback thunk is hoisted to a package var
 internal/tracker  window enumeration and filtering, stable ordering
 internal/tiling   pure layout functions, rule evaluator, DWM frame correction
-internal/bar      AppBar registration and work-area reservation
+internal/bar      multi-bar AppBar manager: registration, work-area reservation
 internal/workspace virtual workspaces over window visibility
 internal/config   TOML schema, validation, live-reload watcher
 internal/rpc      token-authenticated JSON-RPC over loopback WebSocket + control endpoint
@@ -119,8 +174,8 @@ sdk.subscribe("windows.updated", onWindows);
 | --- | --- |
 | M1 Win32 core, safety foundations | Done |
 | M2 Pure-function tiling engine | Done |
-| M3 AppBar, workspaces, taskbar management | Done |
-| M4 WebView2 UI, widget platform | Not started — see open risk below |
+| M3 AppBar, workspaces, taskbar management | Done (multi-bar) |
+| M4 WebView2 UI, widget platform | Not started — route now proven, see below |
 | M5 App launcher, GSMTC media | Partial (launcher done; media bridge not implemented) |
 
 ### Open risk: WebView2 vs. the no-cgo constraint — **resolved**

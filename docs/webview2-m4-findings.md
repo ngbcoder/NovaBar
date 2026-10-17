@@ -143,25 +143,41 @@ a separate problem for when such a widget exists, not as an M4 blocker.
 
 ## 3. Revised M4 scope
 
-1. Add `WS_EX_NOACTIVATE` to the AppBar (one line, do it before anything else).
-2. Add `ABM_SETSTATE` + `ABS_ALWAYSONTOP` to AppBar registration.
-3. New `internal/webview`: wrap `jchv/go-webview2`, host inside the existing AppBar HWND.
+1. ~~Add `WS_EX_NOACTIVATE` to the AppBar~~ — done.
+2. ~~Add `ABM_SETSTATE` + `ABS_ALWAYSONTOP` to AppBar registration~~ — done.
+3. New `internal/webview`: wrap `jchv/go-webview2`, host inside an existing bar HWND.
 4. Pass Seelen's `BASE_ARGS` via `additional_browser_args` (or the equivalent).
 5. Disable system transitions on the host window.
 6. Bind the existing `sdk/novabar.ts` surface over `Bind`/`Init`, driven by the
    already-working JSON-RPC layer and its topics.
 7. `widgets/bar/index.html` gets `pointer-events` handling.
-8. Add the launcher overlay and dock windows, each its own AppBar-style host.
+8. The launcher overlay and dock become bars of their own on their own edges, configured
+   through the `[[bars]]` array that already exists.
 
 `internal/win`, `internal/tiling` and `internal/rpc` stay pure Go and cgo-free; only
 `internal/webview` gains the WebView2 dependency, and `build.ps1 verify` keeps asserting
 `CGO_ENABLED=0` across the whole tree so a regression there is caught immediately.
 
-## 4. Not resolved
+## 4. Resolved since this was written
 
-- **Runtime availability.** WebView2 must be installed. It ships with Windows 11 and
-  current Windows 10 via Edge, so this is a non-issue in practice, but a true
-  Windows 10 LTSC install would need `WebView2Loader.dll` shipped alongside. Decide
-  whether to bundle the loader or fail gracefully.
-- **Multiple AppBar instances** (top + bottom, or per-monitor) need the registry pattern
-  from Seelen rather than the single-instance bool we have.
+- **Runtime availability: closed.** NovaBar targets Windows 11 only, which ships the
+  WebView2 runtime. No `WebView2Loader.dll` needs bundling and no graceful-failure path
+  is required. The daemon warns at startup on a build below 22000 rather than refusing
+  to start, since an unsupported build may still work and a hard failure on a shell
+  would be worse than the risk.
+- **Multiple AppBar instances: done.** `internal/bar` now has a `Manager` that
+  reconciles any number of bars against config, one per screen edge, with add/remove/
+  resize applied live on config save. It uses the registration-registry pattern
+  described above, so `ABM_NEW` is never sent twice for one HWND. Bars are configured as
+  a `[[bars]]` array rather than the old single `[bar]` table, and `hide_taskbar` moved
+  to `[general]` because it is one action on one shell object, not a per-bar property.
+
+## 5. Still open
+
+- **Per-monitor bars.** AppBars currently reserve against the primary screen metrics
+  only (`GetSystemMetrics`). On a multi-monitor setup a bar reserved per screen needs
+  the non-primary monitor's `MONITORINFO`, and the work-area interaction between bars on
+  different displays is untested here.
+- **Left/right bars and the work area.** Only top and bottom were exercised live. A
+  left bar shrinks the work area horizontally, which interacts with any app that assumes
+  a full-width taskbar; worth a manual check before enabling one.

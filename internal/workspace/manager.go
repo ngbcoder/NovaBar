@@ -123,7 +123,7 @@ func (m *Manager) Switch(targetID int) {
 // repeats, would otherwise run off the end of the range.
 func (m *Manager) Step(delta int) {
 	current := m.ActiveID()
-	next := ((current-1+delta)%Count + Count) % Count + 1
+	next := ((current-1+delta)%Count+Count)%Count + 1
 	m.Switch(next)
 }
 
@@ -247,10 +247,10 @@ func (m *Manager) Describe() []WorkspaceSummary {
 
 // WorkspaceSummary is one entry in Describe's output.
 type WorkspaceSummary struct {
-	ID          int  `json:"id"`
+	ID          int    `json:"id"`
 	Name        string `json:"name"`
-	Active      bool `json:"active"`
-	WindowCount int  `json:"window_count"`
+	Active      bool   `json:"active"`
+	WindowCount int    `json:"window_count"`
 }
 
 func sortedIDs(m map[int]*Workspace) []int {

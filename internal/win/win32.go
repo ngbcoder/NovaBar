@@ -12,30 +12,31 @@ var (
 	modDwmapi   = windows.NewLazySystemDLL("dwmapi.dll")
 	modShell32  = windows.NewLazySystemDLL("shell32.dll")
 	modKernel32 = windows.NewLazySystemDLL("kernel32.dll")
+	modNtdll    = windows.NewLazySystemDLL("ntdll.dll")
 
 	// User32 procedures
-	procSetWinEventHook      = modUser32.NewProc("SetWinEventHook")
-	procUnhookWinEvent        = modUser32.NewProc("UnhookWinEvent")
-	procGetMessageW          = modUser32.NewProc("GetMessageW")
-	procTranslateMessage     = modUser32.NewProc("TranslateMessage")
-	procDispatchMessageW     = modUser32.NewProc("DispatchMessageW")
-	procPostQuitMessage      = modUser32.NewProc("PostQuitMessage")
-	procPostMessageW         = modUser32.NewProc("PostMessageW")
-	procFindWindowW          = modUser32.NewProc("FindWindowW")
-	procShowWindow           = modUser32.NewProc("ShowWindow")
-	procIsWindowVisible      = modUser32.NewProc("IsWindowVisible")
-	procGetWindowTextW       = modUser32.NewProc("GetWindowTextW")
-	procGetClassNameW        = modUser32.NewProc("GetClassNameW")
-	procGetWindowLongPtrW    = modUser32.NewProc("GetWindowLongPtrW")
+	procSetWinEventHook          = modUser32.NewProc("SetWinEventHook")
+	procUnhookWinEvent           = modUser32.NewProc("UnhookWinEvent")
+	procGetMessageW              = modUser32.NewProc("GetMessageW")
+	procTranslateMessage         = modUser32.NewProc("TranslateMessage")
+	procDispatchMessageW         = modUser32.NewProc("DispatchMessageW")
+	procPostQuitMessage          = modUser32.NewProc("PostQuitMessage")
+	procPostMessageW             = modUser32.NewProc("PostMessageW")
+	procFindWindowW              = modUser32.NewProc("FindWindowW")
+	procShowWindow               = modUser32.NewProc("ShowWindow")
+	procIsWindowVisible          = modUser32.NewProc("IsWindowVisible")
+	procGetWindowTextW           = modUser32.NewProc("GetWindowTextW")
+	procGetClassNameW            = modUser32.NewProc("GetClassNameW")
+	procGetWindowLongPtrW        = modUser32.NewProc("GetWindowLongPtrW")
 	procGetWindowThreadProcessId = modUser32.NewProc("GetWindowThreadProcessId")
-	procEnumWindows          = modUser32.NewProc("EnumWindows")
-	procSetWindowPos         = modUser32.NewProc("SetWindowPos")
-	procBeginDeferWindowPos  = modUser32.NewProc("BeginDeferWindowPos")
-	procDeferWindowPos       = modUser32.NewProc("DeferWindowPos")
-	procEndDeferWindowPos    = modUser32.NewProc("EndDeferWindowPos")
-	procRegisterHotKey       = modUser32.NewProc("RegisterHotKey")
-	procUnregisterHotKey     = modUser32.NewProc("UnregisterHotKey")
-	procGetSystemMetrics     = modUser32.NewProc("GetSystemMetrics")
+	procEnumWindows              = modUser32.NewProc("EnumWindows")
+	procSetWindowPos             = modUser32.NewProc("SetWindowPos")
+	procBeginDeferWindowPos      = modUser32.NewProc("BeginDeferWindowPos")
+	procDeferWindowPos           = modUser32.NewProc("DeferWindowPos")
+	procEndDeferWindowPos        = modUser32.NewProc("EndDeferWindowPos")
+	procRegisterHotKey           = modUser32.NewProc("RegisterHotKey")
+	procUnregisterHotKey         = modUser32.NewProc("UnregisterHotKey")
+	procGetSystemMetrics         = modUser32.NewProc("GetSystemMetrics")
 
 	// Dwmapi procedures
 	procDwmGetWindowAttribute = modDwmapi.NewProc("DwmGetWindowAttribute")
@@ -55,13 +56,13 @@ var (
 	procDestroyWindow    = modUser32.NewProc("DestroyWindow")
 
 	// Window geometry / activation
-	procGetWindowRectW        = modUser32.NewProc("GetWindowRect")
-	procGetForegroundWindow   = modUser32.NewProc("GetForegroundWindow")
-	procSetForegroundWindow   = modUser32.NewProc("SetForegroundWindow")
-	procIsIconic              = modUser32.NewProc("IsIconic")
-	procIsWindow              = modUser32.NewProc("IsWindow")
-	procMoveWindow            = modUser32.NewProc("MoveWindow")
-	procPostThreadMessageW    = modUser32.NewProc("PostThreadMessageW")
+	procGetWindowRectW      = modUser32.NewProc("GetWindowRect")
+	procGetForegroundWindow = modUser32.NewProc("GetForegroundWindow")
+	procSetForegroundWindow = modUser32.NewProc("SetForegroundWindow")
+	procIsIconic            = modUser32.NewProc("IsIconic")
+	procIsWindow            = modUser32.NewProc("IsWindow")
+	procMoveWindow          = modUser32.NewProc("MoveWindow")
+	procPostThreadMessageW  = modUser32.NewProc("PostThreadMessageW")
 )
 
 type WNDCLASSEX struct {
@@ -108,23 +109,23 @@ const (
 	EVENT_OBJECT_HIDE          = 0x8003
 	EVENT_OBJECT_NAMECHANGE    = 0x800C
 
-	OBJID_WINDOW = 0x00000000
+	OBJID_WINDOW   = 0x00000000
 	INDEXID_OBJECT = 0
 )
 
 // Window messages handled on the pinned message pump thread.
 const (
-	WM_HOTKEY = 0x0312
-	WM_CLOSE  = 0x0010
+	WM_HOTKEY  = 0x0312
+	WM_CLOSE   = 0x0010
 	WM_DESTROY = 0x0002
 )
 
 // Window styles and attributes
 const (
-	GWL_STYLE     = -16
-	GWL_EXSTYLE   = -20
-	WS_POPUP      = 0x80000000
-	WS_VISIBLE    = 0x10000000
+	GWL_STYLE        = -16
+	GWL_EXSTYLE      = -20
+	WS_POPUP         = 0x80000000
+	WS_VISIBLE       = 0x10000000
 	WS_EX_TOPMOST    = 0x00000008
 	WS_EX_TOOLWINDOW = 0x00000080
 	WS_EX_APPWINDOW  = 0x00040000
@@ -152,9 +153,17 @@ const (
 	SWP_NOOWNERZORDER  = 0x0200
 	SWP_NOSENDCHANGING = 0x0400
 
-	HWND_TOP    = 0
-	HWND_BOTTOM = 1
-	HWND_TOPMOST = ^uintptr(0) // -1
+	// WM_SETTINGCHANGE, used to announce a work-area change.
+	WM_SETTINGCHANGE = 0x001A
+
+	// SMTO_ABORTIFHUNG
+	SMTO_ABORTIFHUNG = 0x0002
+
+	HWND_BROADCAST = 0xffff
+
+	HWND_TOP       = 0
+	HWND_BOTTOM    = 1
+	HWND_TOPMOST   = ^uintptr(0) // -1
 	HWND_NOTOPMOST = ^uintptr(1) // -2
 
 	// DWM Window Attributes
@@ -165,17 +174,17 @@ const (
 	DWM_CLOAKED_INHERITED       = 0x00000004
 
 	// AppBar messages
-	ABM_NEW        = 0x00000000
-	ABM_REMOVE     = 0x00000001
-	ABM_QUERYPOS   = 0x00000002
-	ABM_SETPOS     = 0x00000003
-	ABM_GETSTATE   = 0x00000004
-	ABM_GETTASKBARPOS = 0x00000005
-	ABM_ACTIVATE   = 0x00000006
-	ABM_GETAUTOHIDEBAR = 0x00000007
-	ABM_SETAUTOHIDEBAR = 0x00000008
+	ABM_NEW              = 0x00000000
+	ABM_REMOVE           = 0x00000001
+	ABM_QUERYPOS         = 0x00000002
+	ABM_SETPOS           = 0x00000003
+	ABM_GETSTATE         = 0x00000004
+	ABM_GETTASKBARPOS    = 0x00000005
+	ABM_ACTIVATE         = 0x00000006
+	ABM_GETAUTOHIDEBAR   = 0x00000007
+	ABM_SETAUTOHIDEBAR   = 0x00000008
 	ABM_WINDOWPOSCHANGED = 0x00000009
-	ABM_SETSTATE   = 0x0000000A
+	ABM_SETSTATE         = 0x0000000A
 
 	// AppBar states, used with ABM_SETSTATE.
 	ABS_AUTOHIDE    = 0x00000001
@@ -199,19 +208,19 @@ const (
 
 // Virtual-key codes used by the default hotkey bindings.
 const (
-	VK_R      = 0x52
-	VK_SPACE  = 0x20
-	VK_LEFT   = 0x25
-	VK_RIGHT  = 0x27
-	VK_1      = 0x31
-	VK_2      = 0x32
-	VK_3      = 0x33
-	VK_4      = 0x34
-	VK_5      = 0x35
-	VK_6      = 0x36
-	VK_7      = 0x37
-	VK_8      = 0x38
-	VK_9      = 0x39
+	VK_R     = 0x52
+	VK_SPACE = 0x20
+	VK_LEFT  = 0x25
+	VK_RIGHT = 0x27
+	VK_1     = 0x31
+	VK_2     = 0x32
+	VK_3     = 0x33
+	VK_4     = 0x34
+	VK_5     = 0x35
+	VK_6     = 0x36
+	VK_7     = 0x37
+	VK_8     = 0x38
+	VK_9     = 0x39
 )
 
 // HotkeyID identifies a registered hotkey in WM_HOTKEY messages. Ids are unique

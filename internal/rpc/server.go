@@ -32,10 +32,10 @@ const (
 	MethodWindowsGet      = "windows.get"
 	MethodConfigGet       = "config.get"
 
-	TopicWindowsUpdated = "windows.updated"
+	TopicWindowsUpdated  = "windows.updated"
 	TopicWorkspaceChange = "workspace.changed"
-	TopicMediaState     = "media.state"
-	TopicSystemStats    = "system.stats"
+	TopicMediaState      = "media.state"
+	TopicSystemStats     = "system.stats"
 )
 
 // ipcFileName is the descriptor written to %APPDATA%\NovaBar\ so that shellctl and
@@ -466,7 +466,7 @@ func (s *Server) dispatch(client *Client, msg []byte) {
 
 func (s *Server) handleSubscribe(client *Client, msg []byte) {
 	var raw struct {
-		ID     any `json:"id"`
+		ID     any    `json:"id"`
 		Method string `json:"method"`
 		Params struct {
 			Topic  string   `json:"topic"`
@@ -476,7 +476,7 @@ func (s *Server) handleSubscribe(client *Client, msg []byte) {
 	if err := json.Unmarshal(msg, &raw); err != nil {
 		_ = client.Send(Response{
 			JSONRPC: "2.0",
-			Error: &RPCError{Code: CodeParseError, Message: "Parse error"},
+			Error:   &RPCError{Code: CodeParseError, Message: "Parse error"},
 		})
 		return
 	}

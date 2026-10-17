@@ -184,8 +184,8 @@ func (e *Engine) Decide(subjects []WindowSubject) []Placement {
 				action = ActionFloat
 			}
 			placements = append(placements, Placement{
-				HWnd:           s.HWnd,
-				Action:         action,
+				HWnd:            s.HWnd,
+				Action:          action,
 				RuleDescription: decision.RuleDescription,
 			})
 			continue

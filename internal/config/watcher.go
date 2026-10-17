@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -165,8 +166,9 @@ func (w *Watcher) reload() {
 
 	w.mu.Lock()
 	changed := cfg.Tiling != w.current.Tiling ||
-		cfg.Bar != w.current.Bar ||
+		cfg.General.HideTaskbar != w.current.General.HideTaskbar ||
 		cfg.Hotkeys != w.current.Hotkeys ||
+		!slices.Equal(cfg.Bars, w.current.Bars) ||
 		len(cfg.Rules) != len(w.current.Rules)
 	w.current = cfg
 	w.mu.Unlock()
