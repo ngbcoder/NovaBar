@@ -8,3 +8,5 @@ require (
 	github.com/pelletier/go-toml/v2 v2.4.3
 	golang.org/x/sys v0.49.0
 )
+
+require github.com/wailsapp/go-webview2 v1.0.23 // indirect
