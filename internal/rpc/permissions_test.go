@@ -250,10 +250,10 @@ func TestSubscriptionAllowedWithPermission(t *testing.T) {
 // TestControlEndpointUnaffectedByWidgetPermissions guards the rescue path: the CLI talks
 // to /control, not /ws, and must keep working regardless of anything a widget did.
 func TestControlEndpointUnaffectedByWidgetPermissions(t *testing.T) {
-	startTestServer(t)
-	desc, err := ReadDescriptor()
+	s := startTestServer(t)
+	desc, err := readDescriptorAt(s.DescriptorPath())
 	if err != nil {
-		t.Fatalf("ReadDescriptor: %v", err)
+		t.Fatalf("reading the test server's descriptor: %v", err)
 	}
 
 	resp, err := SendControlCommand(desc, CmdStatus, 3*time.Second)

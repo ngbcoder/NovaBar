@@ -30,11 +30,11 @@ talking to the daemon over authenticated, permission-checked JSON-RPC:
 Verified together on a two-bar layout: both surfaces attach, connect, receive only the
 permissions their manifests declare, and subscribe to their topics.
 
-Still to do: session property reads in the GSMTC media bridge (activation now works and
-is tested; reading a session's title, artist and transport state is not implemented, so
-the media area stays hidden) and app pinning for the dock, which currently shows only
-running windows. See [docs/gsmtc-m5-findings.md](docs/gsmtc-m5-findings.md) for why the
-read path was left unwritten.
+Still to do: session property reads in the GSMTC media bridge. Activation now works and is
+tested — an earlier wrong class name was the real cause, not the machine — but reading a
+session's title, artist and transport state is not implemented, so the media area stays
+hidden. App pinning for the dock is now done; see
+[docs/gsmtc-m5-findings.md](docs/gsmtc-m5-findings.md) for what remains on media.
 
 ## Safety
 

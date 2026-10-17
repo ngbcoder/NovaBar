@@ -338,6 +338,21 @@ func (s *Server) DescriptorPath() string {
 	return s.descriptor
 }
 
+// SetDescriptorPath redirects the discovery descriptor.
+//
+// Exists mainly for tests. Without it, a Server defaults to the real
+// %APPDATA%\NovaBar\ipc.json, so a test that calls Start writes the user's live
+// discovery file and Stop then deletes it. That is worse than untidy: the descriptor is
+// how shellctl and widgets find a running daemon, so a test run against a live shell
+// breaks its IPC discovery.
+//
+// Must be called before Start.
+func (s *Server) SetDescriptorPath(path string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.descriptor = path
+}
+
 // RegisterMethod binds an RPC method name to a handler.
 func (s *Server) RegisterMethod(method string, handler HandlerFunc) {
 	s.mu.Lock()
@@ -727,16 +742,26 @@ func IPCDescriptorPath() string { return ipcPath() }
 // Returns an error when no daemon is running or the file is unreadable, which callers
 // use to fall back to direct recovery.
 func ReadDescriptor() (IPCDescriptor, error) {
+	return readDescriptorAt(ipcPath())
+}
+
+// readDescriptorAt is ReadDescriptor for an explicit path.
+//
+// Tests must use this with the server's own DescriptorPath rather than ReadDescriptor.
+// A test server writes to its own temp descriptor, so reading the global one would test
+// the developer's real machine rather than the server under test, and would silently pass
+// for the wrong reason when both happened to point at the same place.
+func readDescriptorAt(path string) (IPCDescriptor, error) {
 	var desc IPCDescriptor
-	data, err := os.ReadFile(ipcPath())
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return desc, err
 	}
 	if err := json.Unmarshal(data, &desc); err != nil {
-		return desc, fmt.Errorf("malformed ipc descriptor at %s: %w", ipcPath(), err)
+		return desc, fmt.Errorf("malformed ipc descriptor at %s: %w", path, err)
 	}
 	if desc.Port == 0 || desc.Token == "" {
-		return desc, fmt.Errorf("incomplete ipc descriptor at %s", ipcPath())
+		return desc, fmt.Errorf("incomplete ipc descriptor at %s", path)
 	}
 	return desc, nil
 }

@@ -1,11 +1,11 @@
 {
   "id": "novabar.dock",
   "name": "NovaBar Dock",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "entry": "index.html",
   "permissions": [
     "windows.read",
-    "windows.control",
+    "windows.focus",
     "launcher.use",
     "pins.manage"
   ],

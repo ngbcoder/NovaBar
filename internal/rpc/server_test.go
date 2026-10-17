@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +19,13 @@ func startTestServer(t *testing.T) *Server {
 	t.Helper()
 
 	s := NewServer()
+	// Redirect the discovery descriptor into the test's own directory.
+	//
+	// Without this the server writes the real %APPDATA%\NovaBar\ipc.json and Stop then
+	// removes it, so running the suite would break a live daemon's IPC discovery. That
+	// is the one thing this shell must never do.
+	s.SetDescriptorPath(filepath.Join(t.TempDir(), ipcFileName))
+
 	s.SetControlHandler(func(command string) (any, error) {
 		if command == CmdStatus {
 			return map[string]any{"pid": 1234}, nil
@@ -160,7 +168,7 @@ func TestTokenIsUnpredictable(t *testing.T) {
 func TestDescriptorIsUserOnly(t *testing.T) {
 	s := startTestServer(t)
 
-	desc, err := ReadDescriptor()
+	desc, err := readDescriptorAt(s.DescriptorPath())
 	if err != nil {
 		t.Fatalf("ReadDescriptor: %v", err)
 	}
@@ -457,10 +465,10 @@ func TestControlRequiresToken(t *testing.T) {
 }
 
 func TestControlStatusRoundTrip(t *testing.T) {
-	startTestServer(t)
-	desc, err := ReadDescriptor()
+	s := startTestServer(t)
+	desc, err := readDescriptorAt(s.DescriptorPath())
 	if err != nil {
-		t.Fatalf("ReadDescriptor: %v", err)
+		t.Fatalf("reading the test server's descriptor: %v", err)
 	}
 
 	resp, err := SendControlCommand(desc, CmdStatus, 3*time.Second)
@@ -480,8 +488,8 @@ func TestControlStatusRoundTrip(t *testing.T) {
 }
 
 func TestControlRejectsUnknownCommand(t *testing.T) {
-	startTestServer(t)
-	desc, _ := ReadDescriptor()
+	s := startTestServer(t)
+	desc, _ := readDescriptorAt(s.DescriptorPath())
 
 	resp, err := SendControlCommand(desc, "rm -rf", 3*time.Second)
 	if err != nil {
@@ -499,9 +507,10 @@ func TestControlRejectsUnknownCommand(t *testing.T) {
 // makes shellctl think a shell is running.
 func TestDescriptorRemovedOnStop(t *testing.T) {
 	s := startTestServer(t)
+	path := s.DescriptorPath()
 	s.Stop()
 
-	if _, err := ReadDescriptor(); err == nil {
+	if _, err := readDescriptorAt(path); err == nil {
 		t.Error("descriptor should be removed when the server stops")
 	}
 }

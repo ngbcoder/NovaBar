@@ -29,10 +29,11 @@ type pinServer struct {
 func startPinServer(t *testing.T, store *pins.Store, permissions ...string) *pinServer {
 	t.Helper()
 
-	// Keep the discovery descriptor out of the real %APPDATA%.
-	t.Setenv("APPDATA", t.TempDir())
-
 	srv := rpc.NewServer()
+	// Redirect the descriptor into this test's directory rather than relying on
+	// t.Setenv("APPDATA"). Setenv is process-wide, cannot be combined with
+	// t.Parallel, and would not help if a caller outside this package started a server.
+	srv.SetDescriptorPath(filepath.Join(t.TempDir(), "ipc.json"))
 	registerPinMethods(srv, store)
 
 	secret := "test-widget-secret"

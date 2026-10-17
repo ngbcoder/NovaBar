@@ -11,16 +11,26 @@ import (
 
 // sessionManagerClass is the WinRT runtime class name for the GSMTC session manager.
 //
-// Activation goes through the class *name* rather than the CLSID because it is a WinRT
-// activatable class, not a classic COM server.
-const sessionManagerClass = "Windows.GlobalSystemMediaTransportControls.GlobalSystemMediaTransportControlsSessionManager"
-
-// iidSessionManager is IID_IGlobalSystemMediaTransportControlsSessionManager.
+// The namespace is Windows.Media.Control. An earlier version of this file used
+// Windows.GlobalSystemMediaTransportControls, which is not a real namespace, and drew the
+// conclusion from the resulting REGDB_E_CLASSNOTREG that the machine had no media stack.
 //
-// Asking the factory for this typed interface directly, rather than activating and then
-// calling QueryInterface, means a failure here is unambiguously about the class rather
-// than about a later QI.
-var iidSessionManager = ole.NewGUID("aaa77787-7800-4a9b-9aca-ed191d966edf")
+// A wrong activatable class name is indistinguishable from an absent one at the API
+// boundary: both are REGDB_E_CLASSNOTREG. That mistake produced a confident, wrong
+// diagnosis and a pile of investigation into the environment, the app identity and the
+// activation contract. Verify the class name before concluding anything about the
+// environment.
+const sessionManagerClass = "Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager"
+
+// iidUnknown is requested rather than the typed session-manager interface.
+//
+// Asking the factory for IID_IUnknown is the one acquisition step verified to work: it
+// returns a valid object for this class. The typed IID was never confirmed and is not
+// needed yet, because nothing below can read the object.
+//
+// Verifying identifiers against the live object, rather than from memory, is the lesson
+// from the class-name mistake. See docs/gsmtc-m5-findings.md.
+var iidUnknown = ole.NewGUID("00000000-0000-0000-c000-000000000046")
 
 // HRESULTs worth distinguishing. A single opaque "activation failed" hides the one fact
 // that decides whether this is fixable, so the two common cases get named.
@@ -102,7 +112,7 @@ func NewBridge() (Bridge, error) {
 		}, nil
 	}
 
-	manager, err := ole.RoGetActivationFactory(sessionManagerClass, iidSessionManager)
+	manager, err := ole.RoGetActivationFactory(sessionManagerClass, iidUnknown)
 	if err != nil {
 		return &unavailableBridge{
 			reason: "the Windows GSMTC session manager is not available: " + classifyActivationError(err),

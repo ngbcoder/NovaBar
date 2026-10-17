@@ -7,11 +7,13 @@ from Go. Most of this is about failures, because the failures were the expensive
 
 - **`go-ole` v1.3.0 is pure Go.** The plan to relax cgo for `internal/media` was based on
   a false premise, so the no-cgo constraint still holds tree-wide.
-- Activation is implemented and tested. **Session property reads are not**, because they
-  cannot be exercised on this machine and untested vtable marshalling crashes rather than
-  returning an error.
-- On this machine the OS refuses activation entirely with `REGDB_E_CLASSNOTREG`, via all
-  three documented routes.
+- **GSMTC was never unavailable.** An earlier version of this file blamed the machine; the
+  real cause was a wrong class name. Section 4 is the post-mortem.
+- Activation now works and the bridge attaches. **Session property reads are not written**,
+  because they need five more hand-written vtables plus an async property round trip, and a
+  wrong slot terminates the process rather than returning an error.
+- `windows-rs` was evaluated as a way to avoid that marshalling and **is Rust-only**; there
+  are no Go bindings.
 
 ## 1. go-ole does not need cgo
 
@@ -65,28 +67,82 @@ The consequence is that an unfiltered `if err != nil` makes the bridge claim Win
 on a perfectly healthy thread. `isHarmlessROError` filters it on the HRESULT rather than
 the message, and there is a test pinning that.
 
-## 4. This machine has no usable GSMTC stack
+## 4. GSMTC was never unavailable — the class name was wrong
 
-All three documented activation routes fail identically:
+**This section previously said the opposite. It was wrong.**
 
-| Route | Result |
+Every probe used:
+
+```
+Windows.GlobalSystemMediaTransportControls.GlobalSystemMediaTransportControlsSessionManager
+```
+
+That class does not exist. The namespace is **`Windows.Media.Control`**:
+
+```
+Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager
+```
+
+With the corrected name, `RoGetActivationFactory` returns a valid object immediately. The
+bridge now attaches.
+
+### Why the mistake was expensive
+
+A wrong activatable class name and an absent one are **indistinguishable at the API
+boundary**: both return `REGDB_E_CLASSNOTREG`. So `REGDB_E_CLASSNOTREG` was read as
+evidence about the environment, and a chain of investigation followed that was all
+reasonable and all chasing the wrong thing:
+
+- concluded this Windows build has no media session stack
+- checked OS edition and build and the audio services, which are all fine
+- searched the registry for the activatable class, found nothing, and nearly believed it.
+  The same scan also failed to find `Windows.Foundation.Uri`, which definitely activates,
+  so the location was simply wrong
+- formed an app-identity hypothesis because the failing classes looked capability-gated,
+  then disproved it: `MediaPlayer` is not identity-gated yet is refused, while
+  `MediaSource` works
+
+Seven of twelve probed WinRT classes activated fine. That should have been the signal that
+the environment was healthy and the failing names were the problem.
+
+### The check that would have caught it
+
+Before concluding anything about a platform from a single "not found" result, confirm the
+identifier exists. `REGDB_E_CLASSNOTREG` answers "is this class name registered", not "is
+this feature present". The cheap check is to ask for `IID_IUnknown` first:
+
+```go
+// If this fails, the class name is wrong.
+ole.RoGetActivationFactory(className, iidUnknown)
+```
+
+`internal/media` does exactly this now, and requests `IID_IUnknown` rather than a typed
+interface recalled from documentation — an unverified IID is the same mistake one level
+down.
+
+### Verified facts for whoever resumes this
+
+| Fact | Value |
 | --- | --- |
-| `RoActivateInstance(className)` | `REGDB_E_CLASSNOTREG` |
-| `RoGetActivationFactory(className, IID_IGlobalSystemMediaTransportControlsSessionManager)` | `REGDB_E_CLASSNOTREG` |
-| `CoCreateInstance(CLSID_GlobalSystemMediaTransportControlsSessionManager, IID_...)` | `REGDB_E_CLASSNOTREG` |
+| Class name | `Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager` |
+| `RoActivateInstance` | `E_NOTIMPL` — not directly activatable |
+| `RoGetActivationFactory(…, IID_IUnknown)` | succeeds |
+| Acquiring the manager | requires the static `RequestAsync()`, so an `IAsyncOperation` and its `GetResults` |
+| Reading a session | `GetCurrentSession()`/`GetSessions()` on the manager; `GetPlaybackInfo()`, `GetTimelineProperties()`, `TryPlayAsync()`, `TryPauseAsync()`, `TryGetMediaPropertiesAsync()` on the session |
 
-The OS is Windows 11 25H2 (build 26200.9711), Professional, where GSMTC is expected to
-exist. So this is not obviously a stripped image, and it is not a marshalling bug — three
-independent APIs agree.
+The public runtime class exposes only `GetCurrentSession`, `GetSessions` and `RequestAsync`.
+`GetPlaybackInfo`/`GetProperties` live on the `IGlobalSystemMediaTransportControlsSessionManager`
+interface. Media properties (title, artist, album) need an
+`IAsyncOperation<IPropertySet>` — an async round trip, not a synchronous getter.
 
-Note on registry archaeology: searching
-`HKLM:\SOFTWARE\Classes\ActivatableClasses` for the class returns nothing, but so does a
-control search for `Windows.Foundation.Uri`, which means that location is simply the
-wrong place to look. The registry tells you nothing here; the runtime's own HRESULT does.
+One trap already hit: `RoGetActivationFactory(…, IID_IUnknown)` does **not** hand back the
+`IActivationFactory` vtable. It returns the class's *default interface*, so calling slot 6
+expecting `ActivateInstance` faults at `0xffffffffffffffff` rather than returning
+`E_NOTIMPL`. Reach the manager through `RequestAsync`, not by poking the factory vtable.
 
-`classifyActivationError` names `REGDB_E_CLASSNOTREG`, `E_NOINTERFACE` and
-`E_ACCESSDENIED` separately, because whether this is fixable is the only thing the user
-cares about and a single opaque "activation failed" hides it.
+`classifyActivationError` still names `REGDB_E_CLASSNOTREG`, `E_NOINTERFACE` and
+`E_ACCESSDENIED` separately, because whether a failure is fixable is the only thing a user
+can act on.
 
 ## 5. What is deliberately not implemented
 
@@ -95,10 +151,15 @@ Reading a session's title, artist, album, playback status and timeline needs
 `IMediaPlaybackControl` to drive transport — several more hand-written vtables on top of
 the activation that now works.
 
-That code is **not written**, deliberately. It cannot be exercised on a machine where
-activation is refused, and a mistake in hand-rolled vtable marshalling terminates the
-process rather than returning an error — demonstrated, when `RoActivateInstance` with a
-bad struct produced a `0xc0000005` access violation inside the Go runtime.
+That code is **not written**, deliberately. It needs at least five more vtables —
+`IActivationFactory`, `IAsyncOperation`, the manager interface, the session interface and
+`IPropertySet`/`IMap` — and a mistake in hand-rolled marshalling terminates the process
+rather than returning an error, demonstrated twice: a bad `ROACTIVATIONRO` struct produced
+a `0xc0000005` access violation inside the Go runtime, and assuming the factory exposed
+`IActivationFactory` faulted at `0xffffffffffffffff`.
+
+`windows-rs` would have supplied metadata-generated bindings and removed that risk
+entirely. It is Rust-only; there is no Go equivalent, so the ABI has to be written by hand.
 
 A crash in `NewBridge` would hit the daemon's pinned message-pump thread, which is
 exactly what the watchdog exists to prevent. Untestable code that can crash the shell is

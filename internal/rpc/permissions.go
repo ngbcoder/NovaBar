@@ -13,7 +13,15 @@ import (
 const (
 	// PermWindowsRead observes tracked windows.
 	PermWindowsRead = "windows.read"
-	// PermWindowsControl focuses, moves and closes windows.
+	// PermWindowsFocus brings an existing window to the front.
+	//
+	// Split out from PermWindowsControl because focusing is what nearly every widget
+	// wants and is almost harmless, while moving and closing a window the user did not
+	// target is destructive and not. Bundling them meant the launcher, whose only window
+	// operation is focusing an already-running app, had to be granted the ability to
+	// close windows.
+	PermWindowsFocus = "windows.focus"
+	// PermWindowsControl moves and closes windows.
 	PermWindowsControl = "windows.control"
 	// PermWorkspaceManage switches workspaces.
 	PermWorkspaceManage = "workspaces.manage"
@@ -38,6 +46,7 @@ var AllPermissions = []string{
 	PermMediaControl,
 	PermPinsManage,
 	PermWindowsControl,
+	PermWindowsFocus,
 	PermWindowsRead,
 	PermWorkspaceManage,
 }
@@ -59,7 +68,7 @@ func ValidPermission(p string) bool {
 // what it should require, rather than to silently inherit the session token's access.
 var methodPermissions = map[string]string{
 	MethodWindowsGet:      PermWindowsRead,
-	MethodWindowFocus:     PermWindowsControl,
+	MethodWindowFocus:     PermWindowsFocus,
 	MethodWindowMove:      PermWindowsControl,
 	MethodWindowClose:     PermWindowsControl,
 	MethodWorkspaceGet:    PermWindowsRead,
