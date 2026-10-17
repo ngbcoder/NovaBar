@@ -250,6 +250,7 @@ sdk.subscribe("windows.updated", onWindows);
 | M3 AppBar, workspaces, taskbar management | Done (multi-bar, multi-edge) |
 | M4 WebView2 UI, widget platform | Done (bar, dock, launcher, manifest permissions) |
 | M5 App launcher, GSMTC media | Partial (launcher done; media bridge not implemented) |
+| M6 Settings menu | Not started — see [Planned: settings menu](#planned-settings-menu) |
 
 ### Open risk: WebView2 vs. the no-cgo constraint — **resolved**
 
@@ -273,3 +274,35 @@ See [docs/webview2-m4-findings.md](docs/webview2-m4-findings.md) for the verific
 steps and for what `ngbcoder/SeelenNovaBar` does that is worth copying — window flags,
 the Chromium arguments a desktop bar *must* pass, and why the transparency approach is
 CSS rather than Win32 hit-testing.
+
+> **Correction to the section above.** The library actually in use is
+> `wailsapp/go-webview2`, not `jchv/go-webview2`. Both are pure Go and both build with
+> `CGO_ENABLED=0`, but jchv's `pkg/edge` hardcodes a null `environmentOptions` at
+> `chromium.go:87`, so Chromium command-line arguments cannot be passed at all — which
+> loses the timer-throttling fix described above. `wailsapp/go-webview2` has
+> `WithAdditionalBrowserArguments` and attaches to an existing HWND.
+>
+> Also: jchv's `Create(debug, window)` discards its `window` argument, so it cannot
+> attach to an existing window at all. The path that does work is `NewWindow` or
+> `NewWithOptions`.
+
+## Planned: settings menu (M6)
+
+Not started. Config is TOML on disk today, which suits a power user and is hostile to
+everyone else: no way to discover the available options, no validation feedback, and
+enabling a second bar means reading the docs.
+
+An in-shell settings overlay, same shape as the launcher: a plain topmost window, no
+work-area reservation, dismissed with the same sentinel.
+
+| Piece | Notes |
+| --- | --- |
+| Schema introspection | Expose the config schema over RPC so the UI is generated from it. Already partly needed: widget manifests drift from the code that validates them. |
+| Typed editing | `config.get` returns the whole document but there is no setter. Needs one, validated server-side, keeping the "inert on error" rule from startup. |
+| First toggles | bar enable/edge/size, tiling enabled/layout/gaps, hide taskbar, hotkeys. |
+| Hotkey capture | The one thing a text field cannot do. Needs a `RegisterHotKey` conflict check at capture time, which the daemon can do cheaply. |
+| Apply without restart | Live reload already covers bar add/remove/edge and taskbar visibility. Layout and gaps do not yet re-tile on change. |
+| Safety | Editing `hide_taskbar` and the rescue hotkey edits the things that protect you. Those two should require the rescue path to already be working. |
+
+Not planned: a settings daemon, a background service, or any config persisted outside
+`%APPDATA%\NovaBar\config.toml`.
