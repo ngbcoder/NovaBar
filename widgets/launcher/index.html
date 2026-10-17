@@ -101,6 +101,24 @@
     }
     .row.sel .kind { color: rgba(255,255,255,0.9); }
 
+    .pin-btn {
+      flex: 0 0 auto;
+      background: transparent;
+      border: none;
+      color: var(--dim);
+      font-size: 15px;
+      line-height: 1;
+      padding: 4px 6px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .pin-btn:hover { background: rgba(255,255,255,0.12); color: var(--fg); }
+    /* The filled star is the only indication of what is pinned, so it must stay
+       legible against the selection accent rather than inheriting the dim colour. */
+    .pin-btn.on { color: #f5c451; }
+    .row.sel .pin-btn { color: rgba(255,255,255,0.75); }
+    .row.sel .pin-btn.on { color: #ffd76a; }
+
     .empty {
       padding: 28px 18px;
       text-align: center;

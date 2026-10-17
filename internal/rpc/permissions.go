@@ -19,6 +19,12 @@ const (
 	PermWorkspaceManage = "workspaces.manage"
 	// PermLauncherUse searches and launches applications.
 	PermLauncherUse = "launcher.use"
+	// PermPinsManage changes the dock's pinned applications.
+	//
+	// Separate from PermLauncherUse because pinning writes to disk and outlives the
+	// session, while launching does not. A widget that may start programs has no
+	// business rearranging what the user keeps.
+	PermPinsManage = "pins.manage"
 	// PermMediaControl drives media transport.
 	PermMediaControl = "media.control"
 	// PermConfigRead reads the shell configuration.
@@ -30,6 +36,7 @@ var AllPermissions = []string{
 	PermConfigRead,
 	PermLauncherUse,
 	PermMediaControl,
+	PermPinsManage,
 	PermWindowsControl,
 	PermWindowsRead,
 	PermWorkspaceManage,
@@ -59,6 +66,11 @@ var methodPermissions = map[string]string{
 	MethodWorkspaceSwitch: PermWorkspaceManage,
 	MethodLauncherSearch:  PermLauncherUse,
 	MethodLauncherLaunch:  PermLauncherUse,
+	MethodPinsList:        PermLauncherUse,
+	MethodPinsAdd:         PermPinsManage,
+	MethodPinsRemove:      PermPinsManage,
+	MethodPinsToggle:      PermPinsManage,
+	MethodPinsMove:        PermPinsManage,
 	MethodMediaGet:        PermWindowsRead,
 	MethodMediaCommand:    PermMediaControl,
 	MethodConfigGet:       PermConfigRead,
@@ -89,6 +101,8 @@ var topicPermissions = map[string]string{
 	TopicWorkspaceChange: PermWindowsRead,
 	TopicMediaState:      PermWindowsRead,
 	TopicSystemStats:     PermWindowsRead,
+	// Pin changes are only interesting to a widget that can already launch things.
+	TopicPinsChanged: PermLauncherUse,
 }
 
 // Client has access to this topic.

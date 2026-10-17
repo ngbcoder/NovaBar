@@ -23,6 +23,9 @@ const DISMISS = '__novabar_dismiss__';
 /** Results currently shown. */
 let results = [];
 
+/** Launch targets the user has pinned, lowercased for matching. */
+let pinnedTargets = new Set();
+
 /** Index of the highlighted row. */
 let selected = 0;
 
@@ -82,6 +85,14 @@ function render() {
         kind.textContent = item.kind === 'window' ? 'window' : 'app';
 
         row.append(glyph, text, kind);
+
+        // A pin control per row. Only offered for launchable items: a running window
+        // has no target of its own, and offering a button that cannot work is worse
+        // than not offering it.
+        if (item.kind !== 'window' && item.target) {
+            row.append(pinButton(item, i));
+        }
+
         row.addEventListener('click', () => choose(i));
         // Mouse hover must move the selection, or clicking a row the keyboard has not
         // reached launches the wrong thing.
@@ -121,6 +132,83 @@ async function search(query) {
     results = merged;
     selected = 0;
     render();
+}
+
+/** Whether an item is currently pinned, matched case-insensitively like the daemon. */
+function isPinned(item) {
+    return pinnedTargets.has(String(item.target || '').trim().toLowerCase());
+}
+
+/**
+ * The per-row pin control.
+ *
+ * stopPropagation matters: the row's click handler launches, so without it a click
+ * aimed at the pin would start the application instead.
+ */
+function pinButton(item, index) {
+    const pinned = isPinned(item);
+    const btn = document.createElement('button');
+    btn.className = 'pin-btn' + (pinned ? ' on' : '');
+    btn.textContent = pinned ? '★' : '☆';
+    btn.title = pinned ? 'Unpin from dock' : 'Pin to dock';
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        togglePin(item, index);
+    });
+    return btn;
+}
+
+/** Pin or unpin an item, then redraw so every row's marker stays truthful. */
+async function togglePin(item, index) {
+    try {
+        const res = await sdk.call('pins.toggle', { target: item.target, name: item.name });
+        pinnedTargets = isPinned(item) ? withoutTarget(item) : withTarget(item);
+        render();
+        return res;
+    } catch (err) {
+        // The store can refuse, e.g. at its pin limit. Say so rather than showing a
+        // star that implies the app was saved when it was not.
+        console.error('pin failed', err);
+        flashError(err.message || String(err));
+    }
+}
+
+function withTarget(item) {
+    const next = new Set(pinnedTargets);
+    next.add(String(item.target || '').trim().toLowerCase());
+    return next;
+}
+
+function withoutTarget(item) {
+    const next = new Set(pinnedTargets);
+    next.delete(String(item.target || '').trim().toLowerCase());
+    return next;
+}
+
+/** Briefly show a message where the results are, then restore them. */
+function flashError(message) {
+    list.replaceChildren(
+        Object.assign(document.createElement('div'), {
+            className: 'empty',
+            textContent: message,
+        }),
+    );
+    setTimeout(() => {
+        if (results.length) render();
+    }, 2200);
+}
+
+/** Ask the daemon for the current pin list. */
+async function loadPins() {
+    try {
+        const res = await sdk.call('pins.list');
+        pinnedTargets = new Set(((res && res.pins) || []).map((p) => String(p.target).trim().toLowerCase()));
+    } catch (err) {
+        // A widget without pins.manage can still list. If even that fails, pinning is
+        // simply unavailable here, which the absent pin buttons make obvious enough.
+        console.warn('could not load pins', err);
+        pinnedTargets = new Set();
+    }
 }
 
 function scheduleSearch() {
@@ -167,6 +255,16 @@ function wireKeys() {
             case 'ArrowUp': e.preventDefault(); move(-1); break;
             case 'Enter': e.preventDefault(); choose(selected); break;
             case 'Escape': e.preventDefault(); dismiss(); break;
+            // Pin or unpin the highlighted row without launching it. Ctrl rather than a
+            // bare letter so it cannot shadow the query the user is still typing.
+            case 'p':
+            case 'P':
+                if (e.ctrlKey) {
+                    e.preventDefault();
+                    const item = results[selected];
+                    if (item && item.kind !== 'window' && item.target) togglePin(item, selected);
+                }
+                break;
         }
     });
 
@@ -197,6 +295,14 @@ async function main() {
         // nothing on screen that would change.
         if (input.value) scheduleSearch();
     });
+
+    // Keep the stars truthful when the dock is rearranged from the other surface.
+    sdk.subscribe('pins.changed', (state) => {
+        pinnedTargets = new Set(((state && state.pins) || []).map((p) => String(p.target).trim().toLowerCase()));
+        render();
+    });
+
+    await loadPins();
 
     try {
         running = (await sdk.call('windows.get')) || [];

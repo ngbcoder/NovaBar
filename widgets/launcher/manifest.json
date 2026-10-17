@@ -1,11 +1,13 @@
 {
   "id": "novabar.launcher",
   "name": "NovaBar Launcher",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "entry": "index.html",
   "permissions": [
     "launcher.use",
-    "windows.read"
+    "pins.manage",
+    "windows.read",
+    "windows.control"
   ],
   "window": {
     "kind": "overlay",

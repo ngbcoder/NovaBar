@@ -31,11 +31,17 @@ const (
 	MethodWindowClose     = "window.close"
 	MethodWindowsGet      = "windows.get"
 	MethodConfigGet       = "config.get"
+	MethodPinsList        = "pins.list"
+	MethodPinsAdd         = "pins.add"
+	MethodPinsRemove      = "pins.remove"
+	MethodPinsToggle      = "pins.toggle"
+	MethodPinsMove        = "pins.move"
 
 	TopicWindowsUpdated  = "windows.updated"
 	TopicWorkspaceChange = "workspace.changed"
 	TopicMediaState      = "media.state"
 	TopicSystemStats     = "system.stats"
+	TopicPinsChanged     = "pins.changed"
 )
 
 // ipcFileName is the descriptor written to %APPDATA%\NovaBar\ so that shellctl and

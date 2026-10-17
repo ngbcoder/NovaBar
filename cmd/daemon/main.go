@@ -22,6 +22,7 @@ import (
 	"github.com/ngbcoder/NovaBar/internal/media"
 	"github.com/ngbcoder/NovaBar/internal/onboarding"
 	"github.com/ngbcoder/NovaBar/internal/overlay"
+	"github.com/ngbcoder/NovaBar/internal/pins"
 	"github.com/ngbcoder/NovaBar/internal/rpc"
 	"github.com/ngbcoder/NovaBar/internal/tiling"
 	"github.com/ngbcoder/NovaBar/internal/tracker"
@@ -57,14 +58,15 @@ type daemon struct {
 	launcher       *overlay.Overlay
 	launcherSecret string
 
-	trk     *tracker.WindowTracker
-	engine  *tiling.Engine
-	spaces  *workspace.Manager
-	indexer *launcher.Indexer
-	media   *media.Controller
-	rpcs    *rpc.Server
-	hotkeys *hotkey.Manager
-	dog     *watchdog.Watchdog
+	trk      *tracker.WindowTracker
+	engine   *tiling.Engine
+	spaces   *workspace.Manager
+	indexer  *launcher.Indexer
+	media    *media.Controller
+	pinStore *pins.Store
+	rpcs     *rpc.Server
+	hotkeys  *hotkey.Manager
+	dog      *watchdog.Watchdog
 
 	// quit is signalled by the signal handler, which hands off to the pump thread.
 	// Win32 requires the quit to originate on the pump thread, so the signal handler
@@ -211,6 +213,21 @@ func (d *daemon) setup() error {
 	d.media = media.NewController()
 	if !d.media.Attached() {
 		log.Printf("[NovaBar] Media: no Windows media session bridge attached; transport controls unavailable\n")
+	}
+
+	// Pinned applications. A failure here is not fatal and not even worth much: the
+	// store opens empty when the file is missing or unreadable, so the dock still shows
+	// running windows. That degradation is deliberate, not a fallback.
+	if pinPath, err := pins.GetPath(); err != nil {
+		log.Printf("[NovaBar] Pins: no location available, dock will show running windows only: %v\n", err)
+	} else if store, err := pins.Open(pinPath); err != nil {
+		log.Printf("[NovaBar] Pins: cannot open %s, dock will show running windows only: %v\n", pinPath, err)
+	} else {
+		d.pinStore = store
+		if store.Degraded != "" {
+			log.Printf("[NovaBar] Pins: %s\n", store.Degraded)
+		}
+		log.Printf("[NovaBar] Pins: %d pinned from %s\n", len(store.List()), pinPath)
 	}
 
 	d.engine = tiling.NewEngine(d.cfg)
@@ -859,6 +876,8 @@ func (d *daemon) registerRPCMethods() {
 		}
 		return map[string]interface{}{"success": true, "target": target}, nil
 	})
+
+	registerPinMethods(r, d.pinStore)
 
 	r.RegisterMethod(rpc.MethodMediaGet, func(json.RawMessage) (interface{}, error) {
 		return d.media.GetCurrentSession(), nil
