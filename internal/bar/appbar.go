@@ -6,17 +6,35 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/novabar-shell/novabar/internal/win"
+	"github.com/ngbcoder/NovaBar/internal/win"
 	"golang.org/x/sys/windows"
 )
 
 const (
-	WM_USER         = 0x0400
+	WM_USER          = 0x0400
 	WM_APPBAR_NOTIFY = WM_USER + 101
-	AppBarClassName = "NovaBarAppBarClass"
+	AppBarClassName  = "NovaBarAppBarClass"
 )
 
-// AppBarManager handles registration, size reservation, and unregistration with the Windows shell.
+// appbarWndProc is the single shared window-procedure thunk for the AppBar class.
+//
+// It is a package-level var so exactly one callback thunk exists. The previous
+// implementation allocated a new thunk inside CreateAndRegister, which leaks one per
+// call.
+var appbarWndProc = windows.NewCallback(func(hwnd windows.HWND, msg uint32, wParam, lParam uintptr) uintptr {
+	switch msg {
+	case WM_APPBAR_NOTIFY:
+		// Shell notifications (ABN_POSCHANGED etc.) arrive here. Position updates are
+		// driven explicitly by the daemon rather than reactively, so nothing to do.
+		return 0
+	case win.WM_DESTROY:
+		return 0
+	}
+	return win.DefWindowProc(hwnd, msg, wParam, lParam)
+})
+
+// AppBarManager handles registration, size reservation, and unregistration with the
+// Windows shell.
 type AppBarManager struct {
 	mu         sync.Mutex
 	hwnd       windows.HWND
@@ -34,7 +52,11 @@ func NewAppBarManager(edge uint32, height int32) *AppBarManager {
 	}
 }
 
-// CreateAndRegister creates a borderless AppBar window and registers it using SHAppBarMessage.
+// CreateAndRegister creates a borderless AppBar window and registers it using
+// SHAppBarMessage.
+//
+// Runs on the pinned message-pump thread: window creation and AppBar registration
+// must happen there so the shell's callbacks land on the thread that owns the window.
 func (ab *AppBarManager) CreateAndRegister() error {
 	ab.mu.Lock()
 	defer ab.mu.Unlock()
@@ -44,30 +66,26 @@ func (ab *AppBarManager) CreateAndRegister() error {
 	}
 
 	classNamePtr, _ := windows.UTF16PtrFromString(AppBarClassName)
-	titlePtr, _ := windows.UTF16PtrFromString("NovaBar+ AppBar")
+	titlePtr, _ := windows.UTF16PtrFromString("NovaBar AppBar")
 
 	modGdi32 := windows.NewLazySystemDLL("gdi32.dll")
 	procCreateSolidBrush := modGdi32.NewProc("CreateSolidBrush")
 	// Dark background RGB(20, 22, 26) = 0x001A1614
 	hBrush, _, _ := procCreateSolidBrush.Call(0x001A1614)
 
-	// Register window class
+	// Register window class. ERROR_CLASS_ALREADY_EXISTS is expected on a second
+	// registration within one process and is not an error.
 	wcx := win.WNDCLASSEX{
-		LpfnWndProc: windows.NewCallback(func(hwnd windows.HWND, msg uint32, wParam, lParam uintptr) uintptr {
-			switch msg {
-			case WM_APPBAR_NOTIFY:
-				// Handle shell notifications (ABN_POSCHANGED, etc.)
-				return 0
-			}
-			return win.DefWindowProc(hwnd, msg, wParam, lParam)
-		}),
+		LpfnWndProc:   appbarWndProc,
 		HbrBackground: windows.Handle(hBrush),
 		LpszClassName: classNamePtr,
 	}
+	if _, err := win.RegisterClassEx(&wcx); err != nil {
+		log.Printf("[NovaBar AppBar] RegisterClassEx reported: %v (continuing)\n", err)
+	}
 
-	_, _ = win.RegisterClassEx(&wcx)
-
-	// Create borderless topmost layered window
+	// Borderless topmost tool window. WS_EX_TOOLWINDOW keeps it out of the taskbar
+	// and Alt+Tab, which matters because NovaBar replaces the taskbar.
 	exStyle := uint32(win.WS_EX_TOOLWINDOW | win.WS_EX_TOPMOST)
 	style := uint32(win.WS_POPUP | win.WS_VISIBLE)
 
@@ -84,7 +102,6 @@ func (ab *AppBarManager) CreateAndRegister() error {
 	}
 	ab.hwnd = hwnd
 
-	// Register AppBar with Windows
 	var abd win.APPBARDATA
 	abd.CbSize = uint32(unsafe.Sizeof(abd))
 	abd.HWnd = ab.hwnd
@@ -93,27 +110,30 @@ func (ab *AppBarManager) CreateAndRegister() error {
 	win.SHAppBarMessage(win.ABM_NEW, &abd)
 	ab.registered = true
 
-	// Position and reserve screen work area
-	ab.UpdatePosition()
+	ab.updatePositionLocked()
 
 	win.ShowWindow(ab.hwnd, win.SW_SHOW)
-	log.Printf("[NovaBar+ AppBar] Registered AppBar successfully (HWND: %v)\n", ab.hwnd)
+	log.Printf("[NovaBar AppBar] Registered AppBar (HWND: %v, edge: %d, height: %d)\n", ab.hwnd, ab.edge, ab.height)
 	return nil
 }
 
-// UpdatePosition queries and sets the system work area reserved for NovaBar.
+// UpdatePosition re-reserves the screen work area and repositions the window.
 func (ab *AppBarManager) UpdatePosition() {
+	ab.mu.Lock()
+	defer ab.mu.Unlock()
+	ab.updatePositionLocked()
+}
+
+func (ab *AppBarManager) updatePositionLocked() {
 	if !ab.registered || ab.hwnd == 0 {
 		return
 	}
 
 	screenW := win.GetSystemMetrics(0) // SM_CXSCREEN
 	screenH := win.GetSystemMetrics(1) // SM_CYSCREEN
-	if screenW <= 0 {
-		screenW = 1920
-	}
-	if screenH <= 0 {
-		screenH = 1080
+	if screenW <= 0 || screenH <= 0 {
+		log.Printf("[NovaBar AppBar] GetSystemMetrics returned %dx%d; leaving reservation unchanged\n", screenW, screenH)
+		return
 	}
 
 	var abd win.APPBARDATA
@@ -131,11 +151,10 @@ func (ab *AppBarManager) UpdatePosition() {
 		abd.Rc.Bottom = screenH
 	}
 
-	// Request work area reduction from Windows shell
+	// Ask the shell to shrink the work area around our rectangle, then commit it.
 	win.SHAppBarMessage(win.ABM_QUERYPOS, &abd)
 	win.SHAppBarMessage(win.ABM_SETPOS, &abd)
 
-	// Reposition the physical window to the reserved rectangle
 	_ = win.SetWindowPos(
 		ab.hwnd,
 		win.HWND_TOPMOST,
@@ -148,7 +167,7 @@ func (ab *AppBarManager) UpdatePosition() {
 	ab.bounds = abd.Rc
 }
 
-// Unregister cleanly removes the AppBar and restores full screen work area.
+// Unregister removes the AppBar and restores the full screen work area.
 func (ab *AppBarManager) Unregister() {
 	ab.mu.Lock()
 	defer ab.mu.Unlock()
@@ -158,15 +177,38 @@ func (ab *AppBarManager) Unregister() {
 	}
 
 	var abd win.APPBARDATA
+	abd.CbSize = uint32(unsafe.Sizeof(abd))
 	abd.HWnd = ab.hwnd
 	win.SHAppBarMessage(win.ABM_REMOVE, &abd)
 	win.DestroyWindow(ab.hwnd)
 	ab.registered = false
 	ab.hwnd = 0
-	log.Println("[NovaBar+ AppBar] Unregistered AppBar and restored desktop work area.")
+	ab.bounds = win.RECT{}
+	log.Println("[NovaBar AppBar] Unregistered AppBar and released the reserved work area.")
 }
 
-// HWND returns the AppBar window handle.
+// HWND returns the AppBar window handle, or 0 when not registered.
 func (ab *AppBarManager) HWND() windows.HWND {
 	return ab.hwnd
+}
+
+// Edge returns the reserved screen edge (win.ABE_TOP or win.ABE_BOTTOM).
+func (ab *AppBarManager) Edge() uint32 {
+	ab.mu.Lock()
+	defer ab.mu.Unlock()
+	return ab.edge
+}
+
+// Bounds returns the reserved rectangle.
+func (ab *AppBarManager) Bounds() win.RECT {
+	ab.mu.Lock()
+	defer ab.mu.Unlock()
+	return ab.bounds
+}
+
+// Registered reports whether the AppBar is currently registered with the shell.
+func (ab *AppBarManager) Registered() bool {
+	ab.mu.Lock()
+	defer ab.mu.Unlock()
+	return ab.registered
 }

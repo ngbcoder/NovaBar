@@ -5,7 +5,7 @@ import (
 	"log"
 	"unsafe"
 
-	"github.com/novabar-shell/novabar/internal/config"
+	"github.com/ngbcoder/NovaBar/internal/config"
 	"golang.org/x/sys/windows"
 )
 
@@ -13,9 +13,9 @@ import (
 func ShowWelcomeNotice(cfg *config.Config) {
 	banner := `
 ============================================================
-              Welcome to NovaBar+ Desktop Shell             
+              Welcome to NovaBar Desktop Shell             
 ============================================================
-  NovaBar+ is a lightweight desktop shell and window manager
+  NovaBar is a lightweight desktop shell and window manager
   designed for Windows 10 & 11.
 
   KEY FEATURES:
@@ -34,12 +34,12 @@ func ShowWelcomeNotice(cfg *config.Config) {
 	fmt.Printf(banner, cfg.General.RescueKey)
 
 	// Show native MessageBoxW (No UAC, fully standard user-space Win32 notification)
-	title, _ := windows.UTF16PtrFromString("Welcome to NovaBar+")
+	title, _ := windows.UTF16PtrFromString("Welcome to NovaBar")
 	text, _ := windows.UTF16PtrFromString(fmt.Sprintf(
-		"Welcome to NovaBar+!\n\n"+
-			"NovaBar+ is now managing your desktop layout.\n\n"+
+		"Welcome to NovaBar!\n\n"+
+			"NovaBar is now managing your desktop layout.\n\n"+
 			"Safety Notice:\n"+
-			"• NovaBar+ runs completely without UAC elevation.\n"+
+			"• NovaBar runs completely without UAC elevation.\n"+
 			"• If you ever want to restore your native Windows taskbar,\n"+
 			"  run 'shellctl --rescue' or press %s.\n\n"+
 			"Would you like to continue?", cfg.General.RescueKey))
@@ -60,6 +60,6 @@ func ShowWelcomeNotice(cfg *config.Config) {
 	// Mark FirstRun as complete and persist
 	cfg.General.FirstRun = false
 	if err := config.Save(*cfg); err != nil {
-		log.Printf("[NovaBar+] Notice saving onboarding status: %v\n", err)
+		log.Printf("[NovaBar] Notice saving onboarding status: %v\n", err)
 	}
 }

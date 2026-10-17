@@ -53,6 +53,15 @@ var (
 	procCreateWindowExW  = modUser32.NewProc("CreateWindowExW")
 	procDefWindowProcW   = modUser32.NewProc("DefWindowProcW")
 	procDestroyWindow    = modUser32.NewProc("DestroyWindow")
+
+	// Window geometry / activation
+	procGetWindowRectW        = modUser32.NewProc("GetWindowRect")
+	procGetForegroundWindow   = modUser32.NewProc("GetForegroundWindow")
+	procSetForegroundWindow   = modUser32.NewProc("SetForegroundWindow")
+	procIsIconic              = modUser32.NewProc("IsIconic")
+	procIsWindow              = modUser32.NewProc("IsWindow")
+	procMoveWindow            = modUser32.NewProc("MoveWindow")
+	procPostThreadMessageW    = modUser32.NewProc("PostThreadMessageW")
 )
 
 type WNDCLASSEX struct {
@@ -101,6 +110,13 @@ const (
 
 	OBJID_WINDOW = 0x00000000
 	INDEXID_OBJECT = 0
+)
+
+// Window messages handled on the pinned message pump thread.
+const (
+	WM_HOTKEY = 0x0312
+	WM_CLOSE  = 0x0010
+	WM_DESTROY = 0x0002
 )
 
 // Window styles and attributes
@@ -165,6 +181,41 @@ const (
 	ABE_TOP    = 1
 	ABE_RIGHT  = 2
 	ABE_BOTTOM = 3
+)
+
+// Hotkey modifiers
+const (
+	MOD_ALT      = 0x0001
+	MOD_CONTROL  = 0x0002
+	MOD_SHIFT    = 0x0004
+	MOD_WIN      = 0x0008
+	MOD_NOREPEAT = 0x4000
+)
+
+// Virtual-key codes used by the default hotkey bindings.
+const (
+	VK_R      = 0x52
+	VK_SPACE  = 0x20
+	VK_LEFT   = 0x25
+	VK_RIGHT  = 0x27
+	VK_1      = 0x31
+	VK_2      = 0x32
+	VK_3      = 0x33
+	VK_4      = 0x34
+	VK_5      = 0x35
+	VK_6      = 0x36
+	VK_7      = 0x37
+	VK_8      = 0x38
+	VK_9      = 0x39
+)
+
+// HotkeyID identifies a registered hotkey in WM_HOTKEY messages. Ids are unique
+// within the daemon and dispatched by internal/hotkey.
+const (
+	HotkeyRescue uintptr = iota + 1
+	HotkeyLauncher
+	HotkeyWorkspacePrev
+	HotkeyWorkspaceNext
 )
 
 type RECT struct {
@@ -251,6 +302,8 @@ func PostQuitMessage(exitCode int32) {
 	procPostQuitMessage.Call(uintptr(exitCode))
 }
 
+// PostMessage posts a message to a window's queue without waiting for it to be
+// processed.
 func PostMessage(hwnd windows.HWND, msg uint32, wParam, lParam uintptr) error {
 	r1, _, err := procPostMessageW.Call(
 		uintptr(hwnd),
@@ -264,6 +317,26 @@ func PostMessage(hwnd windows.HWND, msg uint32, wParam, lParam uintptr) error {
 	return nil
 }
 
+// PostThreadMessage posts a message to a specific thread's message queue.
+//
+// Used to hand work to the message pump from another goroutine: PostQuitMessage and
+// RegisterHotKey are both thread-affine, so anything crossing a goroutine boundary
+// has to arrive as a message instead.
+func PostThreadMessage(threadID uint32, msg uint32, wParam, lParam uintptr) error {
+	r1, _, err := procPostThreadMessageW.Call(
+		uintptr(threadID),
+		uintptr(msg),
+		wParam,
+		lParam,
+	)
+	if r1 == 0 {
+		return err
+	}
+	return nil
+}
+
+// FindWindow returns the top-level window matching the given class and/or title.
+// Pass "" for either to match on the other alone.
 func FindWindow(className, windowName string) (windows.HWND, error) {
 	var cNamePtr, wNamePtr *uint16
 	var err error
@@ -331,14 +404,6 @@ func GetWindowPID(hwnd windows.HWND) (uint32, error) {
 	return pid, nil
 }
 
-func EnumWindows(callback uintptr, lParam uintptr) error {
-	r1, _, err := procEnumWindows.Call(callback, lParam)
-	if r1 == 0 {
-		return err
-	}
-	return nil
-}
-
 func SetWindowPos(hwnd windows.HWND, hWndInsertAfter uintptr, x, y, cx, cy int32, uFlags uint32) error {
 	r1, _, err := procSetWindowPos.Call(
 		uintptr(hwnd),
@@ -386,14 +451,6 @@ func GetExtendedFrameBounds(hwnd windows.HWND) (RECT, error) {
 func SHAppBarMessage(dwMessage uint32, pData *APPBARDATA) uintptr {
 	r1, _, _ := procSHAppBarMessage.Call(uintptr(dwMessage), uintptr(unsafe.Pointer(pData)))
 	return r1
-}
-
-func EnumDisplayMonitors(hdc uintptr, lprcClip *RECT, lpfnEnum uintptr, dwData uintptr) error {
-	r1, _, err := procEnumDisplayMonitors.Call(hdc, uintptr(unsafe.Pointer(lprcClip)), lpfnEnum, dwData)
-	if r1 == 0 {
-		return err
-	}
-	return nil
 }
 
 func GetMonitorInfo(hMonitor uintptr, lpmi *MONITORINFO) bool {
@@ -474,4 +531,88 @@ func DestroyWindow(hwnd windows.HWND) bool {
 func GetSystemMetrics(nIndex int32) int32 {
 	r1, _, _ := procGetSystemMetrics.Call(uintptr(nIndex))
 	return int32(r1)
+}
+
+// GetWindowRect returns the window rectangle in screen coordinates. Unlike
+// GetExtendedFrameBounds this is the "real" window rect and is what DWM border
+// compensation must be measured against.
+func GetWindowRect(hwnd windows.HWND) (RECT, error) {
+	var r RECT
+	r1, _, err := procGetWindowRectW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&r)))
+	if r1 == 0 {
+		return r, err
+	}
+	return r, nil
+}
+
+// IsValid reports whether hwnd still refers to a live window. Stale handles from a
+// previous enumeration are expected once windows are destroyed.
+func IsValid(hwnd windows.HWND) bool {
+	r1, _, _ := procIsWindow.Call(uintptr(hwnd))
+	return r1 != 0
+}
+
+// GetForegroundWindow returns the currently focused top-level window, or 0.
+func GetForegroundWindow() windows.HWND {
+	r1, _, _ := procGetForegroundWindow.Call()
+	return windows.HWND(r1)
+}
+
+// SetForegroundWindow brings hwnd to the foreground. Returns false when Windows
+// denies the request, which it does for background processes.
+func SetForegroundWindow(hwnd windows.HWND) bool {
+	r1, _, _ := procSetForegroundWindow.Call(uintptr(hwnd))
+	return r1 != 0
+}
+
+// IsMinimized reports whether hwnd is currently minimized.
+func IsMinimized(hwnd windows.HWND) bool {
+	r1, _, _ := procIsIconic.Call(uintptr(hwnd))
+	return r1 != 0
+}
+
+// RegisterHotKey binds a system-wide hotkey. On success the daemon receives
+// WM_HOTKEY with the given id on its message pump thread.
+//
+// Must be called from the thread running the message loop.
+func RegisterHotKey(id uintptr, modifiers uint32, vk uint32) error {
+	r1, _, err := procRegisterHotKey.Call(0, id, uintptr(modifiers), uintptr(vk))
+	if r1 == 0 {
+		return err
+	}
+	return nil
+}
+
+// UnregisterHotKey releases a hotkey previously bound with RegisterHotKey.
+func UnregisterHotKey(id uintptr) bool {
+	r1, _, _ := procUnregisterHotKey.Call(0, id)
+	return r1 != 0
+}
+
+// RegisterHotKeyResult describes the outcome of a single hotkey registration.
+type RegisterHotKeyResult struct {
+	ID   uintptr
+	Spec string
+	Err  error
+}
+
+// RegisterHotKeys binds a batch of hotkeys, reporting per-key outcomes instead of
+// failing fast. A key already owned by another application is a common and
+// non-fatal condition, so callers surface it and carry on. Results come back in
+// ascending id order so logging is deterministic.
+func RegisterHotKeys(bindings map[uintptr]HotkeyBinding) []RegisterHotKeyResult {
+	results := make([]RegisterHotKeyResult, 0, len(bindings))
+	for _, id := range SortedHotkeyIDs(bindings) {
+		b := bindings[id]
+		err := RegisterHotKey(id, b.Modifiers, b.VK)
+		results = append(results, RegisterHotKeyResult{ID: id, Spec: b.String(), Err: err})
+	}
+	return results
+}
+
+// UnregisterHotKeys releases every previously registered hotkey id.
+func UnregisterHotKeys(ids []uintptr) {
+	for _, id := range ids {
+		UnregisterHotKey(id)
+	}
 }

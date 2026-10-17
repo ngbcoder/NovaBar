@@ -1,7 +1,7 @@
 {
-  "id": "io.novabar.defaultbar",
+  "id": "novabar.defaultbar",
   "name": "NovaBar Default Bar",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "entry": "index.html",
   "permissions": [
     "windows.read",

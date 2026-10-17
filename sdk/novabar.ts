@@ -1,5 +1,5 @@
 /**
- * NovaBar+ Widget SDK
+ * NovaBar Widget SDK
  * Lightweight TypeScript/JavaScript helper for talking to the Go daemon over JSON-RPC 2.0
  */
 
