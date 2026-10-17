@@ -123,16 +123,25 @@ sdk.subscribe("windows.updated", onWindows);
 | M4 WebView2 UI, widget platform | Not started — see open risk below |
 | M5 App launcher, GSMTC media | Partial (launcher done; media bridge not implemented) |
 
-### Open risk: WebView2 vs. the no-cgo constraint
+### Open risk: WebView2 vs. the no-cgo constraint — **resolved**
 
-WebView2's `ICoreWebView2` is COM. The common pure-Go routes either shell out to a
-native host binary or need `go-ole`, which requires cgo. This is the one place the
-"no cgo" constraint may have to bend, and it should be settled before M4 starts.
+WebView2's `ICoreWebView2` is COM, and the obvious pure-Go route appeared blocked
+because `go-ole` needs cgo. It is not.
 
-The older `go/NovaBar` repo went the `go-ole` route (its history includes
-*"initialize COM as STA via `ole.CoInitializeEx` before creating webview2 window"*), so
-that is a known quantity here.
+**`github.com/jchv/go-webview2` is pure Go and compiles, links and runs with
+`CGO_ENABLED=0`.** Its only dependencies are a DLL loader and `x/sys`.
 
-Options if cgo turns out to be unavoidable: accept a sidecar `WebView2Loader.dll` and
-keep the daemon pure-Go; or relax cgo for the UI host module only, leaving `win`,
-`tiling` and `rpc` pure.
+What actually cost the old NovaBar its no-cgo constraint was **Wails v3**, which
+requires cgo. Its `feat/m1-keep-awake` branch had already begun migrating to
+`jchv/go-webview2` when it stopped. Wails was the problem, not WebView2 — worth
+remembering before reaching for a framework.
+
+`jchv/go-webview2` also exposes `Create(debug bool, window unsafe.Pointer)`, which
+attaches to an **existing HWND**. WebView2 can therefore be hosted inside the AppBar
+window `internal/bar` already owns, which keeps the work-area reservation logic where it
+is and confines the new dependency to one package.
+
+See [docs/webview2-m4-findings.md](docs/webview2-m4-findings.md) for the verification
+steps and for what `ngbcoder/SeelenNovaBar` does that is worth copying — window flags,
+the Chromium arguments a desktop bar *must* pass, and why the transparency approach is
+CSS rather than Win32 hit-testing.

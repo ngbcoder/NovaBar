@@ -84,9 +84,12 @@ func (ab *AppBarManager) CreateAndRegister() error {
 		log.Printf("[NovaBar AppBar] RegisterClassEx reported: %v (continuing)\n", err)
 	}
 
-	// Borderless topmost tool window. WS_EX_TOOLWINDOW keeps it out of the taskbar
-	// and Alt+Tab, which matters because NovaBar replaces the taskbar.
-	exStyle := uint32(win.WS_EX_TOOLWINDOW | win.WS_EX_TOPMOST)
+	// Borderless topmost tool window.
+	//
+	// WS_EX_NOACTIVATE is the important one: without it, clicking the bar pulls focus
+	// away from whatever the user is actually working in. Seelen builds its bar windows
+	// with the equivalent of exactly this (Tauri's focusable(false)).
+	exStyle := uint32(win.WS_EX_TOOLWINDOW | win.WS_EX_TOPMOST | win.WS_EX_NOACTIVATE)
 	style := uint32(win.WS_POPUP | win.WS_VISIBLE)
 
 	hwnd, err := win.CreateWindowEx(
@@ -109,6 +112,12 @@ func (ab *AppBarManager) CreateAndRegister() error {
 
 	win.SHAppBarMessage(win.ABM_NEW, &abd)
 	ab.registered = true
+
+	// Keep the bar above other always-on-top windows. Declared but unused before; a
+	// bar that another topmost window can cover is not much of a bar.
+	abd.LParam = win.ABS_ALWAYSONTOP
+	win.SHAppBarMessage(win.ABM_SETSTATE, &abd)
+	abd.LParam = 0
 
 	ab.updatePositionLocked()
 
