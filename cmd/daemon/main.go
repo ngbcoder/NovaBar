@@ -64,6 +64,11 @@ type daemon struct {
 	settings       *overlay.Overlay
 	settingsSecret string
 
+	// dock is the floating macOS-style dock. An overlay rather than an AppBar, because
+	// it reserves no work area.
+	dock       *overlay.Overlay
+	dockSecret string
+
 	trk      *tracker.WindowTracker
 	engine   *tiling.Engine
 	spaces   *workspace.Manager
@@ -276,9 +281,16 @@ func (d *daemon) setup() error {
 		d.rpcs.SetAssetHandler("/sdk", webview.WidgetHandler(sdkRoot))
 	}
 
+	// The floating dock needs the widget root, the RPC server and the widget SDK, all of
+	// which only exist by now.
 	if err := d.rpcs.Start(); err != nil {
 		return fmt.Errorf("could not start IPC server: %w", err)
 	}
+
+	// After Start, because the dock's page is served by the listener it navigates to. An
+	// earlier placement opened the window first and the page silently failed to load,
+	// leaving a dock-shaped hole on the desktop.
+	d.showDock()
 
 	// The bars already exist from the applyBars call above, but the surfaces could not
 	// attach then: the widget root is only resolved after the bars, and a widget needs
@@ -320,6 +332,17 @@ func (d *daemon) applyBars(cfg config.Config) {
 
 	for _, bc := range cfg.Bars {
 		if !bc.Enabled {
+			continue
+		}
+		// The dock is no longer an AppBar. A config written before that change may still
+		// carry a [[bars]] entry using the dock widget, and creating it as a bar would put
+		// a vertical strip back on a screen edge next to the floating dock the user now
+		// has. Skip it and say so once, rather than leaving them to wonder why there are
+		// two.
+		if bc.Widget == dockWidgetName {
+			log.Printf("[NovaBar] Bar %q uses the %q widget, which is now the floating dock; "+
+				"remove that [[bars]] entry and use [dock] in config.toml instead\n",
+				bc.Name, dockWidgetName)
 			continue
 		}
 		edge, ok := bar.EdgeForName(bc.Edge)
@@ -1272,6 +1295,7 @@ func (d *daemon) configPump() {
 		}
 
 		d.applyBars(cfg)
+		d.syncDock(cfg)
 
 		d.retile()
 		d.publishWindows()

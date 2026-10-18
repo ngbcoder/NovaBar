@@ -1,142 +1,154 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>NovaBar Dock</title>
-  <style>
-    :root {
-      --bg: rgba(20, 22, 26, 0.78);
-      --accent: #3b82f6;
-      --text: #f3f4f6;
-      --tile: 44px;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+<meta charset="utf-8">
+<title>NovaBar Dock</title>
+<style>
+  :root {
+    --icon: 56px;        /* set from the daemon via dock.size */
+    --radius: 18px;
+    --panel: rgba(38, 40, 46, 0.72);
+    --border: rgba(255, 255, 255, 0.12);
+    --fg: #f2f3f5;
+    --dim: rgba(255, 255, 255, 0.62);
+    --accent: #f0883e;
+  }
 
-    /* Transparent to the pointer except on the tiles themselves, so the strip does
-       not swallow clicks meant for whatever is behind it. */
-    html, body {
-      pointer-events: none;
-      background: transparent;
-      height: 100%;
-    }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: transparent;
+    /* The window spans the monitor and nothing should be selectable or scrollable in the
+       empty space around the dock. */
+    overflow: hidden;
+    user-select: none;
+    cursor: default;
+    font: 12px "Segoe UI", system-ui, sans-serif;
+    /* Windows renders WebView2 on a transparent surface; this keeps the corners of the
+       window from showing as a faint rectangle. */
+    -webkit-font-smoothing: antialiased;
+  }
 
-    body {
-      color: var(--text);
-      font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
-      font-size: 12px;
-      -webkit-user-select: none;
-      user-select: none;
-      overflow: hidden;
-    }
+  /* The panel: a floating rounded pill, centred, hugging the bottom. */
+  #dock {
+    position: absolute;
+    left: 50%;
+    bottom: 6px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    padding: 7px 9px;
+    max-width: calc(100% - 24px);
+    overflow: visible;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow:
+      0 10px 30px rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(18px) saturate(160%);
+  }
 
-    .dock {
-      width: 64px;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 6px;
-      padding: 8px 0;
-      background: var(--bg);
-      backdrop-filter: blur(18px) saturate(140%);
-      border-right: 1px solid rgba(255, 255, 255, 0.07);
-      overflow-y: auto;
-      overflow-x: hidden;
-      scrollbar-width: none;
-    }
-    .dock::-webkit-scrollbar { width: 0; }
+  .tile {
+    position: relative;
+    width: var(--icon);
+    height: var(--icon);
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 13px;
+    background: rgba(255, 255, 255, 0.09);
+    color: var(--fg);
+    font: inherit;
+    /* macOS-style magnification: neighbours grow as the pointer approaches. */
+    transform-origin: bottom center;
+    transition: transform 110ms cubic-bezier(0.22, 0.61, 0.36, 1);
+    will-change: transform;
+  }
+  .tile:active { filter: brightness(1.25); }
 
-    .sep {
-      width: 28px;
-      height: 1px;
-      background: rgba(255, 255, 255, 0.12);
-      flex: 0 0 auto;
-      margin: 2px 0;
-    }
+  .glyph {
+    font-size: calc(var(--icon) * 0.42);
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    pointer-events: none;
+    user-select: none;
+  }
 
-    .tile {
-      pointer-events: auto;
-      position: relative;
-      width: var(--tile);
-      height: var(--tile);
-      flex: 0 0 auto;
-      border-radius: 10px;
-      border: none;
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text);
-      font-size: 17px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 120ms ease, transform 120ms ease;
-    }
-    .tile:hover { background: rgba(255, 255, 255, 0.15); transform: scale(1.06); }
-    .tile:active { transform: scale(0.97); }
+  /* Running indicator, as a dot under the icon. */
+  .dot {
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--dim);
+    pointer-events: none;
+  }
+  .tile.active .dot { background: var(--accent); width: 5px; height: 5px; }
 
-    /* Running indicator: a dot rather than a badge, so the strip stays quiet. */
-    .tile.running::after {
-      content: '';
-      position: absolute;
-      bottom: 3px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 4px;
-      height: 4px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.55);
-    }
-    .tile.active::after { background: var(--accent); width: 5px; height: 5px; }
-    .tile.active { background: rgba(59, 130, 246, 0.18); }
+  /* Thin separator between pinned apps and running windows. */
+  .sep {
+    width: 1px;
+    align-self: stretch;
+    margin: 4px 4px;
+    background: var(--border);
+    flex: 0 0 auto;
+  }
 
-    .tile-label {
-      pointer-events: none;
-      position: absolute;
-      left: calc(100% + 10px);
-      white-space: nowrap;
-      font-size: 12px;
-      padding: 4px 9px;
-      border-radius: 6px;
-      background: rgba(16, 18, 22, 0.96);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      opacity: 0;
-      transition: opacity 120ms ease;
-      z-index: 10;
-    }
-    .tile:hover .tile-label { opacity: 1; }
+  /* Label above the icon, like the real Dock's tooltip. */
+  .tile-label {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    font-size: 12px;
+    padding: 4px 9px;
+    border-radius: 6px;
+    background: rgba(22, 24, 28, 0.96);
+    border: 1px solid var(--border);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 110ms ease;
+    z-index: 20;
+  }
+  .tile:hover .tile-label { opacity: 1; }
 
-    /* Volume indicator.
-       Sits above the running dot rather than replacing it: the dot answers "is it
-       running" and the bar answers "how loud", which are different questions and both
-       matter at a glance. */
-    .tile-volume {
-      pointer-events: none;
-      position: absolute;
-      bottom: 11px;
-      left: 22%;
-      width: 56%;
-      height: 3px;
-      border-radius: 2px;
-      background: rgba(255, 255, 255, 0.16);
-      overflow: hidden;
-    }
-    .tile-volume-fill {
-      display: block;
-      height: 100%;
-      border-radius: 2px;
-      background: rgba(255, 255, 255, 0.82);
-      transition: width 90ms ease;
-    }
-    /* A muted session keeps its level but must not read as audible, so the fill goes to
-       the accent colour and the bar is struck through rather than emptied. */
-    .tile-volume.muted { background: rgba(255, 255, 255, 0.08); }
-    .tile-volume.muted .tile-volume-fill { background: var(--accent); }
-    .tile:hover .tile-volume-fill { background: var(--accent); }
-  </style>
+  /* Volume indicator, above the dot. */
+  .tile-volume {
+    position: absolute;
+    bottom: -6px;
+    left: 22%;
+    width: 56%;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.16);
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 110ms ease;
+  }
+  .tile-volume-fill { display: block; height: 100%; background: var(--fg); }
+  .tile-volume.muted .tile-volume-fill { background: var(--accent); }
+  .tile:hover .tile-volume { opacity: 1; }
+
+  .empty {
+    color: var(--dim);
+    font-size: 11px;
+    padding: 0 10px;
+    line-height: 1.4;
+  }
+</style>
 </head>
 <body>
-  <div class="dock" id="dock"></div>
-
+  <div id="dock"></div>
   <script type="module" src="./main.js"></script>
 </body>
 </html>

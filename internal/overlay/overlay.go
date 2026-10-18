@@ -46,6 +46,23 @@ type Options struct {
 	OnClose func()
 	// OnMessage receives strings posted from the page.
 	OnMessage func(payload string)
+
+	// Position places the window: "center" (the default) or "bottom".
+	//
+	// "bottom" sits above the taskbar and reserves no work area, which is how the
+	// macOS-style dock floats. Unlike a real AppBar it does not shrink the desktop.
+	Position string
+	// SpanMonitor widens the window to the full monitor, so content inside it can center
+	// itself while the window stays a single rectangle.
+	SpanMonitor bool
+	// BottomMargin is the gap between a bottom-positioned window and the screen edge.
+	BottomMargin int32
+	// Transparent composites the window over the desktop instead of painting a
+	// background, which is what lets a rounded dock sit on the wallpaper.
+	Transparent bool
+	// Persistent keeps the window alive when the page posts the dismiss sentinel. The
+	// dock is always present; it is not something the user opened.
+	Persistent bool
 }
 
 // Overlay is a transient popup surface.
@@ -53,6 +70,9 @@ type Overlay struct {
 	hwnd    windows.HWND
 	surface *webview.Surface
 	closed  bool
+	// persistent marks a window that is always present rather than something the user
+	// opened, so a page posting the dismiss sentinel does not close it.
+	persistent bool
 }
 
 // Show creates and displays an overlay centered on the primary monitor.
@@ -87,18 +107,37 @@ func Show(opts Options) (*Overlay, error) {
 	x := int32(float64(screenW-opts.Width) * opts.AnchorX)
 	y := int32(float64(screenH-opts.Height) * opts.AnchorY)
 
+	// A bottom-positioned window spans the monitor and hugs the work-area edge, so the
+	// dock floats above the desktop instead of occupying a reserved strip.
+	if opts.Position == "bottom" {
+		if opts.SpanMonitor {
+			opts.Width = screenW
+		}
+		bottom := int32(win.GetSystemMetrics(1))
+		work := win.GetWorkArea()
+		if work.Bottom > 0 {
+			bottom = work.Bottom
+		}
+		x = work.Left
+		y = bottom - opts.Height - opts.BottomMargin
+	}
+
 	hwnd, err := createOverlayWindow(x, y, opts.Width, opts.Height)
 	if err != nil {
 		return nil, err
 	}
 
-	o := &Overlay{hwnd: hwnd}
+	o := &Overlay{hwnd: hwnd, persistent: opts.Persistent}
 
+	bg := webview.Color{R: 20, G: 22, B: 26, A: 255}
+	if opts.Transparent {
+		bg.A = 0
+	}
 	surface, err := webview.Attach(hwnd, webview.Options{
-		Transparent:     false,
-		BackgroundColor: webview.Color{R: 20, G: 22, B: 26, A: 255},
+		Transparent:     opts.Transparent,
+		BackgroundColor: bg,
 		OnMessage: func(payload string) {
-			if payload == dismissMessage {
+			if payload == dismissMessage && !opts.Persistent {
 				o.Close()
 				return
 			}

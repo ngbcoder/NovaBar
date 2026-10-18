@@ -169,6 +169,29 @@ func layoutOptions() []string {
 func Schema() []Field {
 	fields := []Field{
 		{
+			Path:  "dock.enabled",
+			Label: "Dock",
+			Help:  "Show the floating dock at the bottom of the screen. It sits over the desktop and reserves no space.",
+			Type:  TypeToggle,
+			Get:   func(c *Config) any { return c.Dock.Enabled },
+			Set: func(c *Config, v any) error {
+				c.Dock.Enabled = v.(bool)
+				return nil
+			},
+		},
+		{
+			Path:  "dock.size",
+			Label: "Dock icon size",
+			Type:  TypeNumber,
+			Min:   28,
+			Max:   112,
+			Get:   func(c *Config) any { return c.Dock.Size },
+			Set: func(c *Config, v any) error {
+				c.Dock.Size = v.(int)
+				return nil
+			},
+		},
+		{
 			Path:  "tiling.enabled",
 			Label: "Tile windows",
 			Help:  "Arrange windows automatically as they open and move.",

@@ -33,6 +33,21 @@ type Config struct {
 	Bars    []BarConfig   `toml:"bars"`
 	Hotkeys HotkeyConfig  `toml:"hotkeys"`
 	Rules   []RuleConfig  `toml:"rules"`
+	Dock    DockConfig    `toml:"dock"`
+}
+
+// DockConfig is the floating macOS-style dock.
+//
+// It is not a [[bars]] entry because it does not reserve screen space. A dock that floats
+// over the wallpaper leaves windows underneath it fully usable, which is the point of the
+// design, and modelling it as an AppBar would mean lying about the work area.
+type DockConfig struct {
+	// Enabled shows the dock.
+	Enabled bool `toml:"enabled"`
+	// Size is the icon size in pixels.
+	Size int `toml:"size"`
+	// BottomMargin is the gap between the dock and the bottom of the work area.
+	BottomMargin int `toml:"bottom_margin"`
 }
 
 type GeneralConfig struct {
@@ -127,6 +142,11 @@ func DefaultConfig() Config {
 			{Process: "Taskmgr.exe", Action: "float"},
 			{Process: "explorer.exe", Class: "OperationStatusWindow", Action: "float"},
 			{Process: "TextInputHost.exe", Action: "ignore"},
+		},
+		Dock: DockConfig{
+			Enabled:      true,
+			Size:         56,
+			BottomMargin: 10,
 		},
 	}
 }
@@ -258,6 +278,21 @@ func Validate(cfg *Config) error {
 
 	if err := validateBars(cfg.Bars); err != nil {
 		return err
+	}
+
+	// Dock bounds are clamped rather than rejected: an odd icon size is cosmetic, and
+	// refusing to start because of one would be a poor trade.
+	if cfg.Dock.Size < 28 {
+		cfg.Dock.Size = 28
+	}
+	if cfg.Dock.Size > 112 {
+		cfg.Dock.Size = 112
+	}
+	if cfg.Dock.BottomMargin < 0 {
+		cfg.Dock.BottomMargin = 0
+	}
+	if cfg.Dock.BottomMargin > 200 {
+		cfg.Dock.BottomMargin = 200
 	}
 
 	for i := range cfg.Rules {

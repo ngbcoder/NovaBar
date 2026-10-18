@@ -1,9 +1,10 @@
 {
   "id": "novabar.dock",
   "name": "NovaBar Dock",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "entry": "index.html",
   "permissions": [
+    "config.read",
     "windows.read",
     "windows.focus",
     "launcher.use",
@@ -12,8 +13,9 @@
     "audio.control"
   ],
   "window": {
-    "kind": "dock",
+    "kind": "overlay",
     "transparent": true,
-    "width": 64
+    "width": 0,
+    "height": 108
   }
 }

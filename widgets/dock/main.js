@@ -1,8 +1,9 @@
-// The NovaBar dock widget.
+// The NovaBar floating dock.
 //
-// Shows pinned applications followed by currently running windows. Pinned entries come
-// from the daemon's pin store, which is what makes them outlive the session; the running
-// list is live and unsaved because it is a reflection of reality rather than a choice.
+// A macOS-style dock: a translucent rounded pill floating over the wallpaper, with
+// magnification on hover, running dots, and a separator between pinned applications and
+// running windows. The window itself spans the monitor and reserves no work area, so
+// windows underneath stay fully usable.
 
 import { NovaBarSDK } from '/sdk/novabar.js';
 
@@ -15,36 +16,34 @@ const sdk = new NovaBarSDK({
     widgetToken: boot.widget_token,
 });
 
-/** Applications the user has pinned, in dock order. */
+/** Pinned applications, in dock order. */
 let pinned = [];
 
-/** Windows last seen, keyed by hwnd. */
+/** Windows last seen. */
 let running = [];
 
-/**
- * Per-application audio volume, keyed by pid.
- *
- * Windows refuses volume changes for some application types, most notably Store apps on
- * recent builds. The daemon reports that as an error and the widget logs it rather than
- * pretending the change took, so the bar is only drawn where volume is actually known.
- */
+/** Handle the shell believes is focused. */
+let activeHwnd = 0;
+
+/** Per-application audio volume, keyed by pid. */
 let audio = new Map();
 
-/** Whether the daemon has an audio output device at all. */
-let audioAvailable = false;
+/** Icon size in pixels, driven by config.schema. */
+let iconSize = 56;
 
-/** Handle the shell believes is focused, if the daemon ever tells us. */
-let activeHwnd = 0;
+/** How far a tile grows at full magnification, and how wide the falloff is. */
+const MAGNIFY_MAX = 1.55;
+const MAGNIFY_SPAN = 2; // tiles either side that are affected at all
 
 /**
  * Icon for an app.
  *
- * Real icon extraction is not wired up, so this derives a stable two-letter monogram
- * instead. Deterministic on purpose: an icon that changed on every update would make the
- * dock impossible to scan.
+ * Real icon extraction is not wired up, so this derives a stable two-letter monogram.
+ * Deterministic on purpose: an icon that changed on every update would make the dock
+ * impossible to scan.
  */
 function monogram(name) {
-    const words = name.trim().split(/\s+/).filter(Boolean);
+    const words = String(name || '').trim().split(/\s+/).filter(Boolean);
     if (words.length === 0) return '?';
     if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
     return (words[0][0] + words[1][0]).toUpperCase();
@@ -52,29 +51,37 @@ function monogram(name) {
 
 function makeTile({ label, glyph, running: isRunning, active, onClick, onContextMenu, onWheel, volume }) {
     const btn = document.createElement('button');
-    btn.className = 'tile' + (isRunning ? ' running' : '') + (active ? ' active' : '');
-    btn.textContent = glyph;
+    btn.className = 'tile' + (active ? ' active' : '');
 
-    const tip = document.createElement('span');
-    tip.className = 'tile-label';
-    tip.textContent = label;
-    btn.appendChild(tip);
+    const g = document.createElement('div');
+    g.className = 'glyph';
+    g.textContent = glyph;
+    btn.appendChild(g);
 
-    // Volume indicator. Only drawn when the level is known, so a missing session is
-    // visibly absent rather than shown as a misleading zero.
+    if (isRunning) {
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        btn.appendChild(dot);
+    }
+
     if (volume !== null && volume !== undefined) {
         const bar = document.createElement('span');
         bar.className = 'tile-volume' + (volume.muted ? ' muted' : '');
         const fill = document.createElement('span');
         fill.className = 'tile-volume-fill';
-        // Muted sessions keep their level but must not read as audible.
+        // A muted session keeps its level but must not read as audible.
         fill.style.width = `${Math.round((volume.muted ? 0 : volume.volume) * 100)}%`;
         bar.appendChild(fill);
         btn.appendChild(bar);
-        btn.title = `${label}${volume.muted ? ' (muted)' : ` — ${Math.round(volume.volume * 100)}%`}`;
     }
 
+    const tip = document.createElement('span');
+    tip.className = 'tile-label';
+    tip.textContent = volume && volume.muted ? `${label} (muted)` : label;
+    btn.appendChild(tip);
+
     btn.addEventListener('click', onClick);
+
     if (onContextMenu) {
         btn.addEventListener('contextmenu', (e) => {
             // Without this the browser menu appears over the dock and the shell looks
@@ -84,8 +91,6 @@ function makeTile({ label, glyph, running: isRunning, active, onClick, onContext
         });
     }
     if (onWheel) {
-        // Wheel adjusts volume. preventDefault because otherwise the page scrolls behind
-        // the dock, which is not scrollable and looks like a glitch.
         btn.addEventListener('wheel', (e) => {
             e.preventDefault();
             onWheel(e.deltaY < 0 ? 0.05 : -0.05);
@@ -109,8 +114,7 @@ function volumeForPid(pid) {
  * Volume for a pinned tile.
  *
  * A pin is a launch target, not a window, so there is no pid. Matching on the executable
- * name is the best available answer and is exact for the common case of one application
- * having one audio session.
+ * name is exact for the common case of one application having one audio session.
  */
 function volumeForProcName(procName) {
     if (!procName) return null;
@@ -120,19 +124,14 @@ function volumeForProcName(procName) {
     return null;
 }
 
-/**
- * Nudge one application's volume.
- *
- * The daemon clamps and validates; the widget keeps its own copy consistent so the bar
- * moves immediately rather than after the next poll.
- */
+/** Nudge one application's volume. */
 async function adjustVolume(pid, delta) {
     const current = audio.get(pid);
     if (!current) return;
     const next = Math.min(1, Math.max(0, current.volume + delta));
     try {
         await sdk.call('volume.set', { pid, level: next });
-        // Optimistic update; the audio.updated broadcast corrects it if refused.
+        // Optimistic; the audio.updated broadcast corrects it if Windows refused.
         audio.set(pid, { ...current, volume: next, muted: next === 0 ? current.muted : false });
         renderIfChanged();
     } catch (err) {
@@ -140,7 +139,8 @@ async function adjustVolume(pid, delta) {
     }
 }
 
-function render() {
+/** Build the ordered tile list. */
+function buildTiles() {
     const tiles = [];
 
     for (const app of pinned) {
@@ -175,27 +175,69 @@ function render() {
         }));
     }
 
+    return tiles;
+}
+
+function render() {
+    const tiles = buildTiles();
+
     if (tiles.length === 0) {
         const empty = document.createElement('div');
-        empty.style.cssText = 'color:#9ca3af;font-size:11px;text-align:center;padding:14px 6px;line-height:1.5';
-        empty.textContent = 'No open windows';
+        empty.className = 'empty';
+        empty.textContent = 'Nothing open';
         tiles.push(empty);
     }
 
     dock.replaceChildren(...tiles);
+    wireMagnification();
 }
 
-/** Re-render only when something actually changed, so hover state survives updates. */
+/**
+ * macOS-style magnification.
+ *
+ * The pointer's horizontal distance from each tile's centre decides its scale, with a
+ * cosine falloff over MAGNIFY_SPAN tiles either side. Reimplemented on mousemove rather
+ * than relying on CSS :hover because the real effect scales *neighbours* too, which CSS
+ * cannot express.
+ */
+function wireMagnification() {
+    const tiles = [...dock.querySelectorAll('.tile')];
+    if (tiles.length === 0) return;
+
+    const reset = () => tiles.forEach((t) => { t.style.transform = ''; });
+
+    dock.onpointermove = (e) => {
+        for (const tile of tiles) {
+            const r = tile.getBoundingClientRect();
+            const centre = r.left + r.width / 2;
+            const step = r.width + 4;
+
+            // Distance in tile-widths, so the falloff is independent of icon size.
+            const distance = Math.abs(e.clientX - centre) / step;
+            if (distance > MAGNIFY_SPAN) {
+                tile.style.transform = '';
+                continue;
+            }
+            const falloff = Math.cos((distance / MAGNIFY_SPAN) * (Math.PI / 2));
+            tile.style.transform = `scale(${1 + (MAGNIFY_MAX - 1) * falloff})`;
+        }
+    };
+
+    dock.onpointerleave = reset;
+}
+
 let signature = '';
 function renderIfChanged() {
     // Volume levels are part of the signature, otherwise a wheel adjustment would not
     // repaint until some unrelated change came along.
-    const vol = [...audio.entries()].map(([pid, v]) => `${pid}:${v.muted ? 'm' : v.volume.toFixed(2)}`).join(',');
+    const vol = [...audio.entries()]
+        .map(([pid, v]) => `${pid}:${v.muted ? 'm' : v.volume.toFixed(2)}`).join(',');
     const next = [
         pinned.map((a) => a.target).join(','),
         running.map((w) => `${w.hwnd}:${w.title}`).join(','),
         String(activeHwnd),
         vol,
+        String(iconSize),
     ].join('|');
 
     if (next === signature) return;
@@ -220,9 +262,6 @@ async function focus(hwnd) {
 }
 
 async function loadPinned() {
-    // The daemon owns the store; this widget only reads it. An older version seeded
-    // pins from the whole application index, which made the dock a wall of every
-    // installed program and told the user nothing about what they actually ran.
     try {
         const res = await sdk.call('pins.list');
         pinned = (res && res.pins) || [];
@@ -245,7 +284,7 @@ async function unpin(app) {
     }
 }
 
-/** Fallback glyph for a window whose process name is empty. */
+/** Fallback label for a window whose process name is empty. */
 function nameFor(win) {
     return win.title || win.proc_name || 'Window';
 }
@@ -255,21 +294,13 @@ function setRunning(windows) {
     renderIfChanged();
 }
 
-/**
- * Replace the audio map from a daemon payload.
- *
- * audioAvailable is kept separately so the dock can distinguish "no output device" from
- * "nothing is playing", which look identical in the session list but mean different
- * things to the user.
- */
+/** Replace the audio map from a daemon payload. */
 function setAudio(payload) {
     if (!payload) {
-        audioAvailable = false;
         audio = new Map();
         renderIfChanged();
         return;
     }
-    audioAvailable = Boolean(payload.available);
     const next = new Map();
     for (const s of payload.sessions || []) {
         next.set(s.pid, {
@@ -288,16 +319,22 @@ async function loadAudio() {
     try {
         setAudio(await sdk.call('volume.list'));
     } catch (err) {
-        // No audio, or no permission. Either way there is nothing to draw, and the dock
-        // stays a dock.
         console.warn('audio unavailable', err);
         setAudio(null);
     }
 }
 
+/** Apply the daemon's dock size. */
+function setIconSize(size) {
+    const n = Number(size);
+    if (!Number.isFinite(n) || n <= 0) return;
+    iconSize = n;
+    document.documentElement.style.setProperty('--icon', `${n}px`);
+}
+
 async function main() {
     if (!boot || !boot.hasBridge) {
-        dock.textContent = '';
+        dock.remove();
         return;
     }
 
@@ -305,26 +342,34 @@ async function main() {
         await sdk.connect();
     } catch (err) {
         console.error('could not reach the daemon', err);
+        dock.remove();
         return;
     }
 
-    sdk.subscribe('windows.updated', setRunning);
+    // The dock is opened by the daemon, never by the user, so there is nothing to
+    // dismiss and Escape must not close it.
+    document.addEventListener('keydown', (e) => e.preventDefault());
 
-    // The launcher can pin and unpin while the dock is open, so take the list from the
-    // daemon rather than only reading it once at startup.
-    sdk.subscribe('pins.changed', (state) => {
-        pinned = (state && state.pins) || [];
-        renderIfChanged();
+    sdk.subscribe('windows.updated', setRunning);
+    sdk.subscribe('audio.updated', setAudio);
+    // Size and margin changes arrive here rather than by rebuilding the surface, so a
+    // slider drag does not tear down and recreate a WebView2 controller on every step.
+    sdk.subscribe('system.stats', (stats) => {
+        if (stats && stats.dock) setIconSize(stats.dock.size);
     });
 
     await loadPinned();
     setRunning(await sdk.call('windows.get'));
-
     await loadAudio();
 
-    // The daemon re-reads audio on an interval and pushes only genuine changes, so the
-    // widget does not poll and a volume change from anywhere is picked up here.
-    sdk.subscribe('audio.updated', setAudio);
+    // The schema is the source for the icon size, the same as the settings page. Reading
+    // it here means adding dock settings to config.toml is enough to make them apply.
+    try {
+        const schema = await sdk.call('config.schema');
+        if (schema && schema.values) setIconSize(schema.values['dock.size']);
+    } catch (err) {
+        console.warn('could not read the dock size from the schema', err);
+    }
 }
 
 main();
