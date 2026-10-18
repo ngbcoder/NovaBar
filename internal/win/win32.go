@@ -230,6 +230,7 @@ const (
 	HotkeyLauncher
 	HotkeyWorkspacePrev
 	HotkeyWorkspaceNext
+	HotkeySettings
 )
 
 // RECT carries explicit JSON tags so widgets see the same field names as every other

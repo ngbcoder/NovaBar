@@ -59,6 +59,11 @@ type daemon struct {
 	launcher       *overlay.Overlay
 	launcherSecret string
 
+	// settings is the settings overlay, nil when closed. Separate from the launcher so the
+	// two can be open independently, and each revokes its own credential.
+	settings       *overlay.Overlay
+	settingsSecret string
+
 	trk      *tracker.WindowTracker
 	engine   *tiling.Engine
 	spaces   *workspace.Manager
@@ -687,6 +692,8 @@ func (d *daemon) handleHotkey(id uintptr) {
 		d.performRescue()
 	case hotkey.ActionToggleLauncher:
 		d.toggleLauncher()
+	case hotkey.ActionToggleSettings:
+		d.toggleSettings()
 	case hotkey.ActionWorkspacePrev:
 		d.spaces.Step(-1)
 		d.afterWorkspaceChange()
@@ -756,6 +763,82 @@ func (d *daemon) toggleLauncher() {
 
 	ov.SetBootstrap(js)
 	ov.Navigate(webview.WidgetURL(d.rpcs.Port(), "launcher"))
+}
+
+// toggleSettings opens or closes the settings overlay.
+//
+// Same shape as the launcher: a transient topmost window that reserves no work area, so
+// opening it does not reflow the desktop.
+func (d *daemon) toggleSettings() {
+	if d.settings != nil {
+		d.settings.Close()
+		d.settings = nil
+		if d.settingsSecret != "" && d.rpcs != nil {
+			d.rpcs.RevokeWidget(d.settingsSecret)
+		}
+		d.settingsSecret = ""
+		return
+	}
+
+	if d.widgets == "" {
+		log.Println("[NovaBar] No widgets directory; cannot show settings")
+		return
+	}
+
+	// The manifest is the single source for permissions. The hard-coded list that used to
+	// live in toggleLauncher drifted out of step with the launcher widget's own manifest
+	// and silently broke two features; deriving it removes that failure mode.
+	perms := d.widgetPermissions("settings")
+	if len(perms) == 0 {
+		log.Println("[NovaBar] Settings declares no usable permissions; refusing to open it")
+		return
+	}
+
+	secret, err := randomSecret()
+	if err != nil {
+		log.Printf("[NovaBar] Could not create a settings credential: %v\n", err)
+		return
+	}
+	if err := d.rpcs.RegisterWidget(secret, "settings", perms); err != nil {
+		log.Printf("[NovaBar] Settings credential rejected: %v\n", err)
+		return
+	}
+
+	boot := webview.Bootstrap{
+		Port:        d.rpcs.Port(),
+		Token:       d.rpcs.Token(),
+		WidgetToken: secret,
+		Widget:      "settings",
+		Permissions: perms,
+	}
+	js, err := boot.BootstrapJS()
+	if err != nil {
+		d.rpcs.RevokeWidget(secret)
+		log.Printf("[NovaBar] Could not build the settings bootstrap: %v\n", err)
+		return
+	}
+
+	ov, err := overlay.Show(overlay.Options{
+		Widget:  "settings",
+		Width:   560,
+		Height:  620,
+		AnchorX: 0.5,
+		AnchorY: 0.5,
+		OnMessage: func(payload string) {
+			d.handleWidgetMessage("settings", payload)
+		},
+	})
+	if err != nil {
+		d.rpcs.RevokeWidget(secret)
+		log.Printf("[NovaBar] Could not show settings: %v\n", err)
+		return
+	}
+
+	d.settings = ov
+	d.settingsSecret = secret
+
+	ov.SetBootstrap(js)
+	ov.Navigate(webview.WidgetURL(d.rpcs.Port(), "settings"))
 }
 
 // performRescue restores the desktop and exits.

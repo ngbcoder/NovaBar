@@ -1,0 +1,16 @@
+{
+  "id": "novabar.settings",
+  "name": "NovaBar Settings",
+  "version": "0.1.0",
+  "entry": "index.html",
+  "permissions": [
+    "config.read",
+    "config.write"
+  ],
+  "window": {
+    "kind": "overlay",
+    "transparent": false,
+    "width": 560,
+    "height": 620
+  }
+}

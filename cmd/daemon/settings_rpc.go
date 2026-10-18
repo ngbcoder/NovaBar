@@ -8,6 +8,7 @@ import (
 
 	"github.com/ngbcoder/NovaBar/internal/config"
 	"github.com/ngbcoder/NovaBar/internal/rpc"
+	"github.com/ngbcoder/NovaBar/internal/win"
 )
 
 // registerConfigMethods wires the settings surface.
@@ -145,45 +146,28 @@ func (d *daemon) otherBindingUsing(spec, changingPath string) (string, bool) {
 	return "", false
 }
 
-// validateHotkeySpec checks a combination is shaped like one.
+// validateHotkeySpec checks a combination is one the shell could actually bind.
 //
-// Only shape is checked: a combination needs a modifier and one non-modifier key, because
-// a bare key would swallow ordinary typing system-wide.
+// Delegates to the same parser Register uses, rather than reimplementing the rules. A
+// second implementation of "what is a valid chord" drifts from the first, and the failure
+// mode is a settings page that cheerfully accepts a combination which then silently fails
+// to bind on reload.
 func validateHotkeySpec(spec string) error {
+	if _, err := win.ParseHotkeySpec(spec); err != nil {
+		return err
+	}
+
+	// A bare key would swallow ordinary typing system-wide.
 	parts := strings.Split(spec, "+")
-	if len(parts) < 2 {
-		return fmt.Errorf("%q needs a modifier, for example Ctrl+Alt+R", spec)
-	}
-
-	modifiers := map[string]bool{
-		"ctrl": true, "control": true,
-		"alt": true, "shift": true, "win": true, "windows": true, "super": true,
-	}
-	keys := map[string]bool{
-		"space": true, "enter": true, "return": true, "escape": true, "esc": true, "tab": true,
-		"up": true, "down": true, "left": true, "right": true,
-	}
-
 	modifierCount := 0
-	last := ""
 	for _, raw := range parts {
-		p := strings.ToLower(strings.TrimSpace(raw))
-		if p == "" {
-			return fmt.Errorf("%q has an empty part", spec)
-		}
-		if modifiers[p] {
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "ctrl", "control", "alt", "shift", "win", "windows", "meta", "super", "cmd":
 			modifierCount++
-			continue
 		}
-		keys[p] = true
-		last = p
 	}
-
 	if modifierCount == 0 {
 		return fmt.Errorf("%q has no modifier; that would swallow ordinary typing", spec)
-	}
-	if last == "" {
-		return fmt.Errorf("%q has no key after its modifiers", spec)
 	}
 	return nil
 }

@@ -230,6 +230,16 @@ func Schema() []Field {
 			},
 		},
 		{
+			Path:  "hotkeys.settings",
+			Label: "Open settings",
+			Type:  TypeHotkey,
+			Get:   func(c *Config) any { return c.Hotkeys.Settings },
+			Set: func(c *Config, v any) error {
+				c.Hotkeys.Settings = strings.TrimSpace(fmt.Sprint(v))
+				return nil
+			},
+		},
+		{
 			Path:  "hotkeys.workspace_prev",
 			Label: "Previous workspace",
 			Type:  TypeHotkey,

@@ -19,6 +19,8 @@ const (
 	ActionRescue Action = "rescue"
 	// ActionToggleLauncher shows or hides the app launcher.
 	ActionToggleLauncher Action = "toggle-launcher"
+	// ActionToggleSettings opens the settings overlay.
+	ActionToggleSettings Action = "toggle-settings"
 	// ActionWorkspacePrev and ActionWorkspaceNext move between virtual workspaces.
 	ActionWorkspacePrev Action = "workspace-prev"
 	ActionWorkspaceNext Action = "workspace-next"
@@ -59,6 +61,7 @@ func (m *Manager) Register(cfg config.Config) {
 	m.tryRegister(win.HotkeyLauncher, cfg.Hotkeys.Launcher, ActionToggleLauncher)
 	m.tryRegister(win.HotkeyWorkspacePrev, cfg.Hotkeys.WorkspacePrev, ActionWorkspacePrev)
 	m.tryRegister(win.HotkeyWorkspaceNext, cfg.Hotkeys.WorkspaceNext, ActionWorkspaceNext)
+	m.tryRegister(win.HotkeySettings, cfg.Hotkeys.Settings, ActionToggleSettings)
 
 	m.mu.RLock()
 	failures := append([]string(nil), m.failures...)

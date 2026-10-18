@@ -81,6 +81,8 @@ type HotkeyConfig struct {
 	Launcher      string `toml:"launcher"`
 	WorkspacePrev string `toml:"workspace_prev"`
 	WorkspaceNext string `toml:"workspace_next"`
+	// Settings opens the settings overlay.
+	Settings string `toml:"settings"`
 }
 
 type RuleConfig struct {
@@ -119,6 +121,7 @@ func DefaultConfig() Config {
 			Launcher:      "Win+Space",
 			WorkspacePrev: "Alt+Left",
 			WorkspaceNext: "Alt+Right",
+			Settings:      "Ctrl+Alt+S",
 		},
 		Rules: []RuleConfig{
 			{Process: "Taskmgr.exe", Action: "float"},

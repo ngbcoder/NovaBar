@@ -55,6 +55,12 @@ func VirtualKeyName(vk uint32) string {
 	if name, ok := vkNames[vk]; ok {
 		return name
 	}
+	// Letters and digits are accepted on the way in by virtualKeys, so they have to be
+	// spelled on the way out too. Without this a perfectly good "Ctrl+Alt+S" comes back as
+	// "Ctrl+Alt+0x53", and that is then what gets written to config.toml on the next edit.
+	if c := rune(vk); (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+		return string(c)
+	}
 	return fmt.Sprintf("0x%02X", vk)
 }
 
