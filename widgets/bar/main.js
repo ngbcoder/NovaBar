@@ -54,8 +54,9 @@ function renderWorkspaces(workspaces) {
       const btn = document.createElement('button');
       btn.className = 'ws' + (w.active ? ' active' : '');
       btn.dataset.ws = String(w.id);
-      btn.textContent = w.name;
-      btn.title = `${w.name} - ${w.window_count} window${w.window_count === 1 ? '' : 's'}`;
+      // Numbered circular pills matching the target look
+      btn.textContent = String(w.id);
+      btn.title = `${w.name} – ${w.window_count} window${w.window_count === 1 ? '' : 's'}`;
       btn.addEventListener('click', () => switchWorkspace(w.id));
       return btn;
     }),
@@ -94,7 +95,11 @@ function renderMedia(session) {
 }
 
 function renderClock() {
-  el.clock.textContent = new Date().toLocaleTimeString();
+  el.clock.textContent = new Date().toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 
 function mediaCommand(command) {

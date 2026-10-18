@@ -5,20 +5,21 @@
   <title>NovaBar</title>
   <style>
     :root {
-      --bg: rgba(16, 18, 24, 0.72);
-      --bg-top: rgba(255, 255, 255, 0.05);
-      --accent: #8fa2ff;
-      --accent-ink: #0d1022;
-      --text: #eceef4;
-      --dim: #8d93a5;
-      --chip: rgba(255, 255, 255, 0.06);
-      --chip-hover: rgba(255, 255, 255, 0.13);
-      --hairline: rgba(255, 255, 255, 0.08);
-      --radius: 8px;
+      --bg: rgba(12, 14, 20, 0.78);
+      --bg-top: rgba(255, 255, 255, 0.06);
+      --accent: #2ee6a8;
+      --accent-soft: rgba(46, 230, 168, 0.18);
+      --accent-ink: #061a14;
+      --text: #f0f2f7;
+      --dim: #8b92a8;
+      --chip: rgba(255, 255, 255, 0.07);
+      --chip-hover: rgba(255, 255, 255, 0.14);
+      --hairline: rgba(255, 255, 255, 0.1);
+      --radius: 10px;
+      --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
-    /* Whole document is click-through; only real controls opt back in. */
     html, body {
       pointer-events: none;
       background: transparent;
@@ -39,77 +40,93 @@
       height: 40px;
       display: flex;
       align-items: center;
-      gap: 16px;
-      padding: 0 10px;
+      gap: 14px;
+      padding: 0 12px;
       background:
-        linear-gradient(180deg, var(--bg-top), transparent 60%),
+        linear-gradient(180deg, var(--bg-top), transparent 55%),
         var(--bg);
-      backdrop-filter: blur(24px) saturate(160%);
+      backdrop-filter: blur(28px) saturate(180%);
       border-bottom: 1px solid var(--hairline);
-      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+      box-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
     }
 
-    /* Brand */
+    /* Brand mark — four-point star matching the screenshot */
     .brand {
       pointer-events: auto;
       display: flex;
       align-items: center;
-      gap: 7px;
-      padding: 0 10px 0 8px;
+      gap: 8px;
+      padding: 0 10px 0 6px;
       height: 28px;
-      border-radius: var(--radius);
+      border-radius: 999px;
       font-weight: 650;
       font-size: 13px;
-      letter-spacing: 0.2px;
+      letter-spacing: 0.15px;
       cursor: default;
-      transition: background 140ms ease;
+      transition: background 140ms var(--ease);
     }
     .brand:hover { background: var(--chip); }
     .brand::before {
       content: "";
-      width: 14px;
-      height: 14px;
+      width: 15px;
+      height: 15px;
       background: var(--accent);
-      /* four-point star */
       clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+      filter: drop-shadow(0 0 6px rgba(46, 230, 168, 0.55));
     }
 
-    /* Workspaces: inactive buttons are quiet, the active one stretches into an accent pill */
+    /* Workspaces — numbered circular pills like the target */
     .workspaces {
       display: flex;
       align-items: center;
-      gap: 3px;
+      gap: 4px;
       padding: 3px;
-      border-radius: 10px;
-      background: rgba(0, 0, 0, 0.22);
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.45);
       box-shadow: inset 0 0 0 1px var(--hairline);
     }
 
     .ws {
       pointer-events: auto;
+      width: 24px;
+      height: 24px;
       min-width: 24px;
-      height: 22px;
-      padding: 0 8px;
+      padding: 0;
       border: none;
-      border-radius: 7px;
+      border-radius: 50%;
       background: transparent;
       color: var(--dim);
       font: inherit;
       font-size: 11.5px;
-      font-weight: 500;
+      font-weight: 600;
       font-variant-numeric: tabular-nums;
       cursor: pointer;
-      transition: background 140ms ease, color 140ms ease, min-width 180ms ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition:
+        background 160ms var(--ease),
+        color 160ms var(--ease),
+        box-shadow 160ms var(--ease),
+        transform 120ms var(--ease);
     }
-    .ws:hover { background: var(--chip-hover); color: var(--text); }
+    .ws:hover {
+      background: var(--chip-hover);
+      color: var(--text);
+    }
     .ws.active {
-      min-width: 34px;
       background: var(--accent);
       color: var(--accent-ink);
       font-weight: 700;
+      box-shadow:
+        0 0 12px rgba(46, 230, 168, 0.45),
+        0 2px 6px rgba(0, 0, 0, 0.25);
     }
+    .ws:active { transform: scale(0.92); }
 
-    /* Window title */
+    /* Window title — centered, quiet */
     .title {
       flex: 1;
       min-width: 0;
@@ -119,17 +136,23 @@
       overflow: hidden;
       text-overflow: ellipsis;
       font-size: 12px;
+      font-weight: 500;
       padding: 0 8px;
+      letter-spacing: 0.1px;
     }
 
-    .tray { display: flex; align-items: center; gap: 12px; }
+    .tray {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
 
-    /* Media */
+    /* Compact media pill */
     .media {
       display: flex;
       align-items: center;
       gap: 6px;
-      max-width: 300px;
+      max-width: 280px;
       padding: 3px 12px 3px 4px;
       border-radius: 999px;
       background: var(--chip);
@@ -149,7 +172,7 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .media-title { font-size: 12px; font-weight: 600; }
+    .media-title { font-size: 12px; font-weight: 600; color: var(--text); }
     .media-artist { font-size: 10.5px; color: var(--dim); }
 
     .media-btn {
@@ -165,13 +188,17 @@
       font-size: 11px;
       line-height: 1;
       cursor: pointer;
-      transition: background 140ms ease, transform 100ms ease;
+      transition: background 140ms var(--ease), transform 100ms var(--ease);
     }
     .media-btn:hover { background: var(--chip-hover); }
-    .media-btn:active { transform: scale(0.92); }
-    .media-btn:disabled { opacity: 0.3; cursor: default; background: transparent; transform: none; }
-    #media-toggle { background: var(--accent); color: var(--accent-ink); }
-    #media-toggle:hover { background: #a6b5ff; }
+    .media-btn:active { transform: scale(0.9); }
+    .media-btn:disabled { opacity: 0.28; cursor: default; background: transparent; transform: none; }
+    #media-toggle {
+      background: var(--accent);
+      color: var(--accent-ink);
+      box-shadow: 0 0 10px rgba(46, 230, 168, 0.35);
+    }
+    #media-toggle:hover { background: #4aefb8; }
 
     /* Clock */
     .clock {
@@ -179,6 +206,8 @@
       font-weight: 600;
       font-size: 12.5px;
       padding: 0 6px;
+      letter-spacing: 0.3px;
+      color: var(--text);
     }
 
     /* Offline badge */
@@ -188,7 +217,7 @@
       align-items: center;
       gap: 6px;
       height: 22px;
-      padding: 0 9px;
+      padding: 0 10px;
       border-radius: 999px;
       background: rgba(248, 113, 113, 0.14);
       color: #fca5a5;
@@ -201,13 +230,16 @@
       height: 6px;
       border-radius: 50%;
       background: currentColor;
+      box-shadow: 0 0 6px currentColor;
     }
     .offline.show { display: inline-flex; }
 
-    /* Keyboard focus */
-    .brand:focus-visible, .ws:focus-visible, .media-btn:focus-visible {
+    /* Focus rings */
+    .brand:focus-visible,
+    .ws:focus-visible,
+    .media-btn:focus-visible {
       outline: 2px solid var(--accent);
-      outline-offset: 1px;
+      outline-offset: 2px;
     }
 
     @media (prefers-reduced-motion: reduce) {

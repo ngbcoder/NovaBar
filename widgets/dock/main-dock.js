@@ -50,17 +50,19 @@ function monogram(name) {
 /**
  * A stable hue (0-359) for a name, so each monogram tile keeps its own colour
  * between renders and between sessions instead of every tile being the same grey.
+ * Shifted toward the cyan/teal family to match the target palette.
  */
 function hueFor(name) {
     let h = 0;
     for (const ch of String(name || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    return (h * 137) % 360;
+    // Bias into cooler tones (cyan / teal / blue-green) while keeping variety
+    return 140 + ((h * 137) % 100);
 }
 
 function makeTile({ label, glyph, icon, hue, running: isRunning, active, onClick, onContextMenu, onWheel, volume }) {
     const btn = document.createElement('button');
     btn.className = 'tile' + (active ? ' active' : '') + (icon ? ' has-icon' : '');
-    btn.style.setProperty('--h', String(hue ?? 210));
+    btn.style.setProperty('--h', String(hue ?? 168));
 
     if (icon) {
         const img = document.createElement('img');
