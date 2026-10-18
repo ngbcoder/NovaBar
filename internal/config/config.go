@@ -115,10 +115,21 @@ type RuleConfig struct {
 func DefaultConfig() Config {
 	return Config{
 		General: GeneralConfig{
-			FirstRun:    true,
-			LogLevel:    "info",
-			RescueKey:   "Ctrl+Alt+Shift+R",
-			HideTaskbar: false,
+			FirstRun:  true,
+			LogLevel:  "info",
+			RescueKey: "Ctrl+Alt+Shift+R",
+			// The floating dock is this shell's taskbar, so the native one is hidden by
+			// default. Leaving Windows' taskbar on screen underneath the dock means
+			// showing two, which is not what a taskbar replacement should look like.
+			//
+			// This was previously false because hiding the taskbar on a first run, before
+			// the user has been told how to get out, is the worst time to do it. The
+			// safety reasoning is unchanged, only the default moved: the rescue hotkey is
+			// bound at startup, the watchdog restores the taskbars if the daemon dies, and
+			// the settings surface refuses to change either this or the rescue hotkey while
+			// the rescue path is not working. TestDefaultHideTaskbarIsSafe asserts those,
+			// rather than asserting the flag itself.
+			HideTaskbar: true,
 		},
 		Tiling: TilingConfig{
 			Enabled:       true,

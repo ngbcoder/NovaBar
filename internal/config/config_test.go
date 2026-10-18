@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/ngbcoder/NovaBar/internal/win"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,11 +22,60 @@ func TestDefaultConfigIsValid(t *testing.T) {
 	}
 }
 
-// TestDefaultHideTaskbarIsOff pins the safety-critical default. If this ever flips on,
-// a fresh install hides the taskbar before the user has seen the rescue instructions.
-func TestDefaultHideTaskbarIsOff(t *testing.T) {
-	if DefaultConfig().General.HideTaskbar {
-		t.Error("hide_taskbar must default to false")
+// TestDefaultHideTaskbarIsSafe is the safety pin.
+//
+// hide_taskbar now defaults to true, because the floating dock is this shell's taskbar
+// and leaving the native one visible underneath means showing two. The pin therefore no
+// longer asserts the flag itself; it asserts the three things that make the flag safe, so
+// that flipping the default back, or weakening the escape route, fails a test rather than
+// shipping.
+func TestDefaultHideTaskbarIsSafe(t *testing.T) {
+	cfg := DefaultConfig()
+
+	if !cfg.General.HideTaskbar {
+		t.Error("hide_taskbar should default to true: the dock is the taskbar")
+	}
+
+	// 1. The dock has to be there, or hiding the native taskbar strands the user.
+	if !cfg.Dock.Enabled {
+		t.Error("the dock must be enabled whenever the native taskbar is hidden, " +
+			"or there is no taskbar at all")
+	}
+
+	// 2. There must be a way out that the shell binds at startup.
+	if cfg.Hotkeys.Rescue == "" {
+		t.Error("no rescue hotkey configured; hiding the taskbar would strand the user")
+	}
+	if _, err := win.ParseHotkeySpec(cfg.Hotkeys.Rescue); err != nil {
+		t.Errorf("the default rescue hotkey %q does not parse: %v", cfg.Hotkeys.Rescue, err)
+	}
+
+	// 3. Both settings that guard the user must be gated in the settings surface, so the
+	// shell cannot be talked out of its own escape route.
+	protected := map[string]bool{}
+	for _, p := range ProtectedPaths() {
+		protected[p] = true
+	}
+	for _, p := range []string{"general.hide_taskbar", "hotkeys.rescue"} {
+		if !protected[p] {
+			t.Errorf("%s is not marked SafetyProtect; it must be gated on a working rescue path", p)
+		}
+	}
+}
+
+// TestSafeConfigStillRestoresTheTaskbar: the unreadable-config fallback must leave the
+// native taskbar alone, whatever the default is. A broken config means the user's intent
+// is unknown, and the safe response is to hand them back the taskbar they can use.
+func TestSafeConfigStillRestoresTheTaskbar(t *testing.T) {
+	safe := SafeConfig()
+	if safe.General.HideTaskbar {
+		t.Error("SafeConfig must not hide the native taskbar")
+	}
+	if len(safe.Bars) != 0 {
+		t.Error("SafeConfig must not reserve any bars")
+	}
+	if safe.Tiling.Enabled {
+		t.Error("SafeConfig must not tile")
 	}
 }
 
