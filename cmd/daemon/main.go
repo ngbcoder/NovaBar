@@ -701,6 +701,7 @@ func (d *daemon) handleHotkey(id uintptr) {
 // Runs on the pump thread, since creating the overlay's window and its WebView2
 // controller both belong there.
 func (d *daemon) toggleLauncher() {
+	launcherPerms := d.widgetPermissions("launcher")
 	if d.launcher != nil {
 		d.launcher.Close()
 		d.launcher = nil
@@ -716,10 +717,7 @@ func (d *daemon) toggleLauncher() {
 		log.Printf("[NovaBar] Could not create a launcher credential: %v\n", err)
 		return
 	}
-	if err := d.rpcs.RegisterWidget(secret, "launcher", []string{
-		rpc.PermLauncherUse,
-		rpc.PermWindowsRead,
-	}); err != nil {
+	if err := d.rpcs.RegisterWidget(secret, "launcher", d.widgetPermissions("launcher")); err != nil {
 		log.Printf("[NovaBar] Launcher credential rejected: %v\n", err)
 		return
 	}
@@ -729,7 +727,7 @@ func (d *daemon) toggleLauncher() {
 		Token:       d.rpcs.Token(),
 		WidgetToken: secret,
 		Widget:      "launcher",
-		Permissions: []string{rpc.PermLauncherUse, rpc.PermWindowsRead},
+		Permissions: launcherPerms,
 	}
 	js, err := boot.BootstrapJS()
 	if err != nil {
@@ -897,6 +895,7 @@ func (d *daemon) registerRPCMethods() {
 
 	registerPinMethods(r, d.pinStore)
 	registerVolumeMethods(r, d.audio)
+	registerConfigMethods(r, d)
 
 	r.RegisterMethod(rpc.MethodMediaGet, func(json.RawMessage) (interface{}, error) {
 		return d.media.GetCurrentSession(), nil

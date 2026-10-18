@@ -44,6 +44,12 @@ const (
 	PermAudioControl = "audio.control"
 	// PermConfigRead reads the shell configuration.
 	PermConfigRead = "config.read"
+	// PermConfigWrite changes the shell configuration.
+	//
+	// Distinct from PermConfigRead because writing config edits the shell itself: bar
+	// geometry, the taskbar, the hotkey that gets you out. A widget that draws a
+	// diagnostics page has no business rearranging the desktop because the user opened it.
+	PermConfigWrite = "config.write"
 )
 
 // AllPermissions is every permission a widget may declare, for validation.
@@ -51,6 +57,7 @@ var AllPermissions = []string{
 	PermAudioControl,
 	PermAudioRead,
 	PermConfigRead,
+	PermConfigWrite,
 	PermLauncherUse,
 	PermMediaControl,
 	PermPinsManage,
@@ -95,6 +102,9 @@ var methodPermissions = map[string]string{
 	MethodVolumeSet:       PermAudioControl,
 	MethodVolumeMute:      PermAudioControl,
 	MethodConfigGet:       PermConfigRead,
+	MethodConfigSchema:   PermConfigRead,
+	MethodConfigSet:      PermConfigWrite,
+	MethodHotkeyCheck:    PermConfigWrite,
 }
 
 // MethodPermissions returns the methods that widgets may call and what each needs.
