@@ -58,7 +58,7 @@ func (ts *TaskbarState) Hide() error {
 		}
 	}
 
-	// Capture the pre-hide work area so the refresh can be waited on.
+	// Capture the work area before hiding so the change can be reported honestly.
 	before, _ := PrimaryWorkArea()
 
 	for _, h := range ts.all() {
@@ -67,13 +67,27 @@ func (ts *TaskbarState) Hide() error {
 	ts.hidden = true
 
 	RefreshWorkArea()
-	if after, settled := WorkAreaAfterInsets(before); settled {
+
+	// Hiding the taskbar window does not make Windows give its reservation back on
+	// Windows 11: the window disappears but the work area keeps the pixels it was holding.
+	// The shell then lays out against a work area with a phantom strip at the bottom, which
+	// is why a floating dock hovers above a gap where the taskbar used to be.
+	//
+	// Releasing it means writing the full screen as the work area outright. Done here
+	// rather than left to RefreshWorkArea because that only nudges the taskbar geometry
+	// and broadcasts, which this shell has already seen ignored.
+	if err := RestoreFullWorkArea(); err != nil {
+		log.Printf("[NovaBar Taskbar] Taskbars hidden but the work area could not be released: %v\n", err)
+	}
+	RefreshWorkArea()
+
+	after, _ := PrimaryWorkArea()
+	if after > before {
 		log.Printf("[NovaBar Taskbar] Taskbars hidden; work area grew from %d to %d\n", before, after)
 	} else {
-		// The work area not growing means the hide did not take. Worth saying plainly,
-		// because the symptom is a taskbar the user can still see.
-		log.Printf("[NovaBar Taskbar] Taskbars reported hidden but the work area is unchanged at %d; "+
-			"Windows re-showed them\n", before)
+		// Reporting success here would be actively misleading: the user sees a taskbar.
+		log.Printf("[NovaBar Taskbar] Taskbars hidden but the work area is still %d; "+
+			"Windows did not release the taskbar's reservation\n", after)
 	}
 	return nil
 }
@@ -104,8 +118,17 @@ func hideOne(hwnd windows.HWND) {
 	_ = SetWindowPos(hwnd, 0, 0, 0, 0, 0,
 		SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_HIDEWINDOW)
 
-	_ = SetWindowPos(hwnd, 0, -32000, -32000, 0, 0,
-		SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_HIDEWINDOW)
+	// Collapse the taskbar to zero height and park it off-screen.
+	//
+	// The height is the part that matters. Windows 11 recomputes the work area from the
+	// taskbar's geometry, so a taskbar that is merely hidden, or merely moved off-screen,
+	// keeps reserving the strip it was occupying: the dock then floats above a phantom gap.
+	// Zero height is the only geometry that gives the pixels back.
+	//
+	// The width is kept at a token value rather than zero because a zero-width window is
+	// treated as unresizable by the shell and can be recreated at its original size.
+	_ = SetWindowPos(hwnd, 0, -32000, -32000, 1, 0,
+		SWP_NOZORDER|SWP_NOACTIVATE|SWP_HIDEWINDOW)
 }
 
 // showOne is the inverse of hideOne.

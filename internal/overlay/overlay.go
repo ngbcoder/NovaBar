@@ -107,19 +107,20 @@ func Show(opts Options) (*Overlay, error) {
 	x := int32(float64(screenW-opts.Width) * opts.AnchorX)
 	y := int32(float64(screenH-opts.Height) * opts.AnchorY)
 
-	// A bottom-positioned window spans the monitor and hugs the work-area edge, so the
-	// dock floats above the desktop instead of occupying a reserved strip.
+	// A bottom-positioned window spans the monitor and hugs the screen edge.
+	//
+	// Anchored to the screen, not the work area, deliberately. The dock reserves no space,
+	// so the work area imposes no constraint on it. Following one puts the dock above the
+	// strip Windows reserves for its own taskbar even when that taskbar is hidden: the
+	// shell re-asserts that reservation on Windows 11 and this shell does not fight it for
+	// a strip neither of them needs. A gap under the dock is worse than an unused
+	// reservation.
 	if opts.Position == "bottom" {
 		if opts.SpanMonitor {
 			opts.Width = screenW
 		}
-		bottom := int32(win.GetSystemMetrics(1))
-		work := win.GetWorkArea()
-		if work.Bottom > 0 {
-			bottom = work.Bottom
-		}
-		x = work.Left
-		y = bottom - opts.Height - opts.BottomMargin
+		x = 0
+		y = screenH - opts.Height - opts.BottomMargin
 	}
 
 	hwnd, err := createOverlayWindow(x, y, opts.Width, opts.Height)
