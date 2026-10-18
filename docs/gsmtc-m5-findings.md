@@ -122,23 +122,87 @@ down.
 
 ### Verified facts for whoever resumes this
 
+Read from the installed Windows SDK, not guessed. The C++/WinRT header
+`C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt\Windows.Media.Control.h`
+contains every `...Vtbl` struct, and vtable slots are the declaration order within them.
+
 | Fact | Value |
 | --- | --- |
 | Class name | `Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager` |
 | `RoActivateInstance` | `E_NOTIMPL` — not directly activatable |
-| `RoGetActivationFactory(…, IID_IUnknown)` | succeeds |
-| Acquiring the manager | requires the static `RequestAsync()`, so an `IAsyncOperation` and its `GetResults` |
-| Reading a session | `GetCurrentSession()`/`GetSessions()` on the manager; `GetPlaybackInfo()`, `GetTimelineProperties()`, `TryPlayAsync()`, `TryPauseAsync()`, `TryGetMediaPropertiesAsync()` on the session |
+| Statics interface | `IGlobalSystemMediaTransportControlsSessionManagerStatics` |
+| Manager interface | `IGlobalSystemMediaTransportControlsSessionManager` |
+| Session interface | `IGlobalSystemMediaTransportControlsSession` |
 
-The public runtime class exposes only `GetCurrentSession`, `GetSessions` and `RequestAsync`.
-`GetPlaybackInfo`/`GetProperties` live on the `IGlobalSystemMediaTransportControlsSessionManager`
-interface. Media properties (title, artist, album) need an
-`IAsyncOperation<IPropertySet>` — an async round trip, not a synchronous getter.
+Slots, all IInspectable-derived so IUnknown 0-2 and IInspectable 3-5:
 
-One trap already hit: `RoGetActivationFactory(…, IID_IUnknown)` does **not** hand back the
-`IActivationFactory` vtable. It returns the class's *default interface*, so calling slot 6
-expecting `ActivateInstance` faults at `0xffffffffffffffff` rather than returning
-`E_NOTIMPL`. Reach the manager through `RequestAsync`, not by poking the factory vtable.
+| Interface | Slot | Member |
+| --- | --- | --- |
+| Statics | 6 | `RequestAsync` → `IAsyncOperation<SessionManager>` |
+| Manager | 6 | `GetCurrentSession()` |
+| Manager | 7 | `GetSessions()` |
+| Session | 6 | `get_SourceAppUserModelId` |
+| Session | 7 | `TryGetMediaPropertiesAsync` (async, `IAsyncOperation<IPropertySet>`) |
+| Session | 8 | `GetTimelineProperties` |
+| Session | 9 | `GetPlaybackInfo` |
+| Session | 10 | `TryPlayAsync` |
+| Session | 11 | `TryPauseAsync` |
+| Session | 12 | `TryStopAsync` |
+
+`IAsyncOperation<T>` is IInspectable plus `put_Completed` 6, `get_Completed` 7,
+**`GetResults` 8**.
+
+### Two bugs that cost most of the effort
+
+**1. Reading the wrong array for the vtable.** go-ole's `IUnknown` is
+`{ RawVTable *interface{} }`, and go-ole's own accessors use
+`(*Vtbl)(unsafe.Pointer(v.RawVTable))`. An early probe read a `uintptr` array *at the object
+address* instead, whose first word is `RawVTable` itself, so index 3 was not `GetIids` and
+index 6 was not `ActivateInstance`. Both were garbage and both faulted at
+`0xffffffffffffffff`. This was almost certainly the single biggest reason the earlier
+attempts looked like deep ABI problems rather than an indexing mistake.
+
+**2. `GetIids` stride.** `IID** iids` in the ABI is a pointer to a *contiguous array of
+16-byte IID structs*, not an array of pointers. Walking it with an 8-byte stride and
+dereferencing each element reads garbage.
+
+### What remains, precisely
+
+One identifier is still missing: **the IID of
+`IGlobalSystemMediaTransportControlsSessionManagerStatics`**. The SDK header declares
+`IID_..._IGlobalSystemMediaTransportControlsSessionManagerStatics = __uuidof(...)` but
+`__uuidof` resolves from `Windows.Media.winmd`, so the literal GUID is not in the header,
+and it did not surface in documentation searches.
+
+Once that IID is known the chain is short and every slot is verified:
+
+1. `RoGetActivationFactory(className, staticsIID)` → the factory as statics
+2. slot 6 `RequestAsync` → `IAsyncOperation<SessionManager>`
+3. slot 8 `GetResults` → the manager
+4. manager slot 6 `GetCurrentSession` → the session, or nil when nothing is playing
+5. session slot 9 `GetPlaybackInfo` → status and capability flags
+6. session slot 8 `GetTimelineProperties` → position and duration
+7. session slots 10/11/12 → play, pause, stop
+8. session slot 7 `TryGetMediaPropertiesAsync` → title, artist, album
+
+Steps 5-7 need three more vtables (`PlaybackInfo`, `PlaybackControls`,
+`TimelineProperties`), whose slots are in the same SDK header. Step 8 needs
+`IAsyncOperation` status polling and `IPropertySet` property reads, which is the largest
+remaining piece.
+
+Where to get the IID cheaply: parse the `InterfaceDef` table's GUID heap from
+`Windows.Media.winmd`, or use `DIA`/metadata tooling. Avoid guessing it — an unverified IID
+is the same class of mistake as the wrong class name, and it fails as
+`E_NOINTERFACE`, which reads plausibly.
+
+### Why this is still not written
+
+Every step above is a raw vtable call, and a wrong signature terminates the process rather
+than returning an error. That has now happened three times. The cost is not "writing code",
+it is that each verification cycle costs a process launch, and one of the four remaining
+pieces — the media-properties property bag — cannot be tested until the earlier three are
+right. Shipping a chain that cannot be exercised end to end is how a desktop shell's
+message-pump thread ends up dead.
 
 `classifyActivationError` still names `REGDB_E_CLASSNOTREG`, `E_NOINTERFACE` and
 `E_ACCESSDENIED` separately, because whether a failure is fixable is the only thing a user
