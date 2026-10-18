@@ -61,9 +61,8 @@ func (ts *TaskbarState) Hide() error {
 	// Capture the pre-hide work area so the refresh can be waited on.
 	before, _ := PrimaryWorkArea()
 
-	ShowWindow(ts.primary, SW_HIDE)
-	for _, sec := range ts.secondary {
-		ShowWindow(sec, SW_HIDE)
+	for _, h := range ts.all() {
+		hideOne(h)
 	}
 	ts.hidden = true
 
@@ -71,9 +70,54 @@ func (ts *TaskbarState) Hide() error {
 	if after, settled := WorkAreaAfterInsets(before); settled {
 		log.Printf("[NovaBar Taskbar] Taskbars hidden; work area grew from %d to %d\n", before, after)
 	} else {
-		log.Printf("[NovaBar Taskbar] Taskbars hidden; work area unchanged at %d\n", before)
+		// The work area not growing means the hide did not take. Worth saying plainly,
+		// because the symptom is a taskbar the user can still see.
+		log.Printf("[NovaBar Taskbar] Taskbars reported hidden but the work area is unchanged at %d; "+
+			"Windows re-showed them\n", before)
 	}
 	return nil
+}
+
+// all returns the primary taskbar plus every secondary one.
+func (ts *TaskbarState) all() []windows.HWND {
+	out := make([]windows.HWND, 0, len(ts.secondary)+1)
+	if ts.primary != 0 {
+		out = append(out, ts.primary)
+	}
+	return append(out, ts.secondary...)
+}
+
+// hideOne hides a single taskbar window.
+//
+// SW_HIDE alone is not enough on Windows 11: the shell re-shows its taskbar, sometimes
+// within the same frame, so a shell that only calls it appears to hide the taskbar while
+// leaving it fully visible. Two further steps make it stick.
+//
+// SetWindowPos with SWP_HIDEWINDOW goes through a different code path in the shell, which
+// is what survives its re-show. Moving the window off-screen is the fallback a visibility
+// change cannot undo: even if the shell shows it again, it is not where anyone can see it.
+// Deliberately reversible, and Show restores the position, because rewriting the taskbar's
+// location permanently would outlive NovaBar.
+func hideOne(hwnd windows.HWND) {
+	ShowWindow(hwnd, SW_HIDE)
+
+	_ = SetWindowPos(hwnd, 0, 0, 0, 0, 0,
+		SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_HIDEWINDOW)
+
+	_ = SetWindowPos(hwnd, 0, -32000, -32000, 0, 0,
+		SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_HIDEWINDOW)
+}
+
+// showOne is the inverse of hideOne.
+//
+// The move-back matters more than it looks: the watchdog calls ForceRestoreTaskbar after a
+// crash, and a plain ShowWindow there would leave the taskbar restored to visibility but
+// parked off-screen at -32000,-32000. The user would still have no desktop, which is the
+// one outcome this whole subsystem exists to prevent.
+func showOne(hwnd windows.HWND) {
+	_ = SetWindowPos(hwnd, 0, 0, 0, 0, 0,
+		SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW)
+	ShowWindow(hwnd, SW_SHOW)
 }
 
 // Show restores visibility to all taskbar windows and refreshes the work area.
@@ -83,11 +127,12 @@ func (ts *TaskbarState) Show() error {
 	// Re-find in case handles changed across a monitor or shell restart.
 	_ = ts.Find()
 
-	if ts.primary != 0 {
-		ShowWindow(ts.primary, SW_SHOW)
-	}
-	for _, sec := range ts.secondary {
-		ShowWindow(sec, SW_SHOW)
+	for _, h := range ts.all() {
+		// Undo the off-screen parking before showing, otherwise the taskbar reappears in
+		// the top-left corner instead of at the bottom.
+		_ = SetWindowPos(h, 0, 0, 0, 0, 0,
+			SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW)
+		ShowWindow(h, SW_SHOW)
 	}
 	ts.hidden = false
 
@@ -118,11 +163,11 @@ func (ts *TaskbarState) IsHidden() bool {
 // without a reboot.
 func ForceRestoreTaskbar() {
 	if h, err := FindWindow("Shell_TrayWnd", ""); err == nil && h != 0 {
-		ShowWindow(h, SW_SHOW)
+		showOne(h)
 	}
 	SetEnumWindowsHandler(func(hwnd windows.HWND, lParam uintptr) uintptr {
 		if cName, err := GetClassName(hwnd); err == nil && cName == "Shell_SecondaryTrayWnd" {
-			ShowWindow(hwnd, SW_SHOW)
+			showOne(hwnd)
 		}
 		return 1
 	})
