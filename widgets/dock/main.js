@@ -204,23 +204,39 @@ function wireMagnification() {
     const tiles = [...dock.querySelectorAll('.tile')];
     if (tiles.length === 0) return;
 
-    const reset = () => tiles.forEach((t) => { t.style.transform = ''; });
+    const reset = () => tiles.forEach((t) => {
+        t.style.transform = '';
+        t.style.marginLeft = '';
+        t.style.marginRight = '';
+    });
 
     dock.onpointermove = (e) => {
-        for (const tile of tiles) {
-            const r = tile.getBoundingClientRect();
-            const centre = r.left + r.width / 2;
-            const step = r.width + 4;
+        // offsetWidth is the untransformed layout; getBoundingClientRect on a scaled tile
+        // reports the scaled box, which would make the falloff drift as it runs.
+        const base = tiles.map((t) => t.offsetWidth);
+        let grew = false;
 
-            // Distance in tile-widths, so the falloff is independent of icon size.
-            const distance = Math.abs(e.clientX - centre) / step;
-            if (distance > MAGNIFY_SPAN) {
-                tile.style.transform = '';
-                continue;
+        for (let i = 0; i < tiles.length; i++) {
+            const tile = tiles[i];
+            const r = tile.getBoundingClientRect();
+            const distance = Math.abs(e.clientX - (r.left + r.width / 2)) / (base[i] + 4);
+
+            let scale = 1;
+            if (distance <= MAGNIFY_SPAN) {
+                scale = 1 + (MAGNIFY_MAX - 1) * Math.cos((distance / MAGNIFY_SPAN) * (Math.PI / 2));
             }
-            const falloff = Math.cos((distance / MAGNIFY_SPAN) * (Math.PI / 2));
-            tile.style.transform = `scale(${1 + (MAGNIFY_MAX - 1) * falloff})`;
+            if (scale > 1.001) grew = true;
+
+            tile.style.transform = `scale(${scale})`;
+            // Scaling alone grows each tile in place, so icons overlap and labels collide.
+            // In macOS the dock widens under the pointer for exactly that reason: half the
+            // growth goes to each side, taken from the tile's own margin.
+            const extra = (base[i] * (scale - 1)) / 2;
+            tile.style.marginLeft = `${extra}px`;
+            tile.style.marginRight = `${extra}px`;
         }
+
+        if (!grew) reset();
     };
 
     dock.onpointerleave = reset;
