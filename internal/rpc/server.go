@@ -36,12 +36,16 @@ const (
 	MethodPinsRemove      = "pins.remove"
 	MethodPinsToggle      = "pins.toggle"
 	MethodPinsMove        = "pins.move"
+	MethodVolumeList      = "volume.list"
+	MethodVolumeSet       = "volume.set"
+	MethodVolumeMute      = "volume.mute"
 
 	TopicWindowsUpdated  = "windows.updated"
 	TopicWorkspaceChange = "workspace.changed"
 	TopicMediaState      = "media.state"
 	TopicSystemStats     = "system.stats"
 	TopicPinsChanged     = "pins.changed"
+	TopicAudioUpdated    = "audio.updated"
 )
 
 // ipcFileName is the descriptor written to %APPDATA%\NovaBar\ so that shellctl and

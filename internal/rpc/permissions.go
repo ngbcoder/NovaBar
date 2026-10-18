@@ -35,12 +35,21 @@ const (
 	PermPinsManage = "pins.manage"
 	// PermMediaControl drives media transport.
 	PermMediaControl = "media.control"
+	// PermAudioRead observes per-application audio sessions.
+	PermAudioRead = "audio.read"
+	// PermAudioControl changes per-application volume or mute.
+	//
+	// Separate from PermAudioRead because raising an application's volume is audible to
+	// everyone at the desk, which observing a session is not.
+	PermAudioControl = "audio.control"
 	// PermConfigRead reads the shell configuration.
 	PermConfigRead = "config.read"
 )
 
 // AllPermissions is every permission a widget may declare, for validation.
 var AllPermissions = []string{
+	PermAudioControl,
+	PermAudioRead,
 	PermConfigRead,
 	PermLauncherUse,
 	PermMediaControl,
@@ -82,6 +91,9 @@ var methodPermissions = map[string]string{
 	MethodPinsMove:        PermPinsManage,
 	MethodMediaGet:        PermWindowsRead,
 	MethodMediaCommand:    PermMediaControl,
+	MethodVolumeList:      PermAudioRead,
+	MethodVolumeSet:       PermAudioControl,
+	MethodVolumeMute:      PermAudioControl,
 	MethodConfigGet:       PermConfigRead,
 }
 
@@ -112,6 +124,8 @@ var topicPermissions = map[string]string{
 	TopicSystemStats:     PermWindowsRead,
 	// Pin changes are only interesting to a widget that can already launch things.
 	TopicPinsChanged: PermLauncherUse,
+	// Audio state is only pushed to widgets already allowed to observe audio.
+	TopicAudioUpdated: PermAudioRead,
 }
 
 // Client has access to this topic.

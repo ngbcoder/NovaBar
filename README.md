@@ -170,6 +170,7 @@ internal/watchdog detached recovery process
 internal/webview  WebView2 surfaces hosted in the shell's own windows
 internal/overlay  transient surfaces that reserve no work area (the launcher)
 internal/media    GSMTC bridge; WinRT activation, session reads not yet implemented
+internal/volume   per-application audio volume via Core Audio (WASAPI)
 ```
 
 ### Widgets
@@ -204,7 +205,7 @@ A widget's `manifest.json` declares what it needs, and the daemon enforces it on
 call and every subscription:
 
 ```json
-{ "permissions": ["windows.read", "workspaces.manage", "media.control"] }
+{ "permissions": ["windows.read", "windows.focus", "audio.control"] }
 ```
 
 Available: `windows.read`, `windows.control`, `workspaces.manage`, `launcher.use`,
@@ -256,7 +257,8 @@ sdk.subscribe("windows.updated", onWindows);
 | M3 AppBar, workspaces, taskbar management | Done (multi-bar, multi-edge) |
 | M4 WebView2 UI, widget platform | Done (bar, dock, launcher, manifest permissions) |
 | M5 App launcher, GSMTC media | Partial (launcher done; media activation done, session reads not) |
-| M6 Settings menu | Not started — see [Planned: settings menu](#planned-settings-menu) |
+| M6 Settings menu | Not started - see [Planned: settings menu](#planned-settings-menu) |
+| M7 Per-app volume | Done (Core Audio sessions, dock wheel, `audio.read`/`audio.control`) |
 
 ### Open risk: COM dependencies vs. the no-cgo constraint — **resolved twice**
 

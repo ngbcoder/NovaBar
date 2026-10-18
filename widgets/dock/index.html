@@ -104,6 +104,34 @@
       z-index: 10;
     }
     .tile:hover .tile-label { opacity: 1; }
+
+    /* Volume indicator.
+       Sits above the running dot rather than replacing it: the dot answers "is it
+       running" and the bar answers "how loud", which are different questions and both
+       matter at a glance. */
+    .tile-volume {
+      pointer-events: none;
+      position: absolute;
+      bottom: 11px;
+      left: 22%;
+      width: 56%;
+      height: 3px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.16);
+      overflow: hidden;
+    }
+    .tile-volume-fill {
+      display: block;
+      height: 100%;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.82);
+      transition: width 90ms ease;
+    }
+    /* A muted session keeps its level but must not read as audible, so the fill goes to
+       the accent colour and the bar is struck through rather than emptied. */
+    .tile-volume.muted { background: rgba(255, 255, 255, 0.08); }
+    .tile-volume.muted .tile-volume-fill { background: var(--accent); }
+    .tile:hover .tile-volume-fill { background: var(--accent); }
   </style>
 </head>
 <body>

@@ -26,6 +26,7 @@ import (
 	"github.com/ngbcoder/NovaBar/internal/rpc"
 	"github.com/ngbcoder/NovaBar/internal/tiling"
 	"github.com/ngbcoder/NovaBar/internal/tracker"
+	"github.com/ngbcoder/NovaBar/internal/volume"
 	"github.com/ngbcoder/NovaBar/internal/watchdog"
 	"github.com/ngbcoder/NovaBar/internal/webview"
 	"github.com/ngbcoder/NovaBar/internal/win"
@@ -64,6 +65,7 @@ type daemon struct {
 	indexer  *launcher.Indexer
 	media    *media.Controller
 	pinStore *pins.Store
+	audio    *volume.Controller
 	rpcs     *rpc.Server
 	hotkeys  *hotkey.Manager
 	dog      *watchdog.Watchdog
@@ -213,6 +215,21 @@ func (d *daemon) setup() error {
 	d.media = media.NewController()
 	if !d.media.Attached() {
 		log.Printf("[NovaBar] Media: no Windows media session bridge attached; transport controls unavailable\n")
+	}
+
+	// Per-application volume. The controller pins its own COM thread, so it is safe to
+	// call from any RPC goroutine. Unavailable audio is not fatal: the dock simply omits
+	// the volume affordances rather than showing controls that do nothing.
+	d.audio = volume.New()
+	defer d.audio.Close()
+	d.audio.LogUnavailable()
+	if d.audio.Available() {
+		logAudioStartup(d.audio)
+		// Stop the poller before the controller, so it cannot issue a COM call into a
+		// closed apartment. Defers run last-in-first-out.
+		audioStop := make(chan struct{})
+		defer close(audioStop)
+		go d.pollAudio(audioStop)
 	}
 
 	// Pinned applications. A failure here is not fatal and not even worth much: the
@@ -803,6 +820,7 @@ func (d *daemon) status() map[string]any {
 		"monitors":        monitorInfo,
 		"launcher_items":  d.indexer.Count(),
 		"media":           d.media.GetCurrentSession(),
+		"audio":           d.audioStatus(),
 		"hotkeys":         d.hotkeys.Registered(),
 		"watchdog_pid":    d.dog.PID(),
 		"rpc_port":        d.rpcs.Port(),
@@ -878,6 +896,7 @@ func (d *daemon) registerRPCMethods() {
 	})
 
 	registerPinMethods(r, d.pinStore)
+	registerVolumeMethods(r, d.audio)
 
 	r.RegisterMethod(rpc.MethodMediaGet, func(json.RawMessage) (interface{}, error) {
 		return d.media.GetCurrentSession(), nil
