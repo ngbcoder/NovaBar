@@ -6,6 +6,7 @@ import (
 
 	"github.com/ngbcoder/NovaBar/internal/pins"
 	"github.com/ngbcoder/NovaBar/internal/rpc"
+	"github.com/ngbcoder/NovaBar/internal/win"
 )
 
 // registerPinMethods wires the dock's pin RPC surface.
@@ -23,17 +24,34 @@ func registerPinMethods(r *rpc.Server, store *pins.Store) {
 		return map[string]interface{}{"pins": []interface{}{}}, nil
 	}
 
+	// Helper to enrich pins with extracted Windows icons
+	enrichPins := func(rawPins []pins.Pin) []map[string]interface{} {
+		enriched := make([]map[string]interface{}, len(rawPins))
+		for i, p := range rawPins {
+			iconBase64, err := win.ExtractIconBase64(p.Target)
+			if err != nil {
+				iconBase64 = "" // Fallback gracefully if extraction fails
+			}
+			enriched[i] = map[string]interface{}{
+				"target": p.Target,
+				"name":   p.Name,
+				"icon":   iconBase64,
+			}
+		}
+		return enriched
+	}
+
 	r.RegisterMethod(rpc.MethodPinsList, func(json.RawMessage) (interface{}, error) {
 		if store == nil {
 			return empty()
 		}
-		return map[string]interface{}{"pins": store.List()}, nil
+		return map[string]interface{}{"pins": enrichPins(store.List())}, nil
 	})
 
 	// Every mutation broadcasts, so the dock and the launcher stay consistent when both
 	// are open and a pin is changed in one of them.
 	announce := func() {
-		r.Broadcast(rpc.TopicPinsChanged, map[string]interface{}{"pins": store.List()})
+		r.Broadcast(rpc.TopicPinsChanged, map[string]interface{}{"pins": enrichPins(store.List())})
 	}
 
 	r.RegisterMethod(rpc.MethodPinsAdd, func(params json.RawMessage) (interface{}, error) {

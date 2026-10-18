@@ -88,7 +88,7 @@ function renderMedia(session) {
 
   el.mediaTitle.textContent = session.title;
   el.mediaArtist.textContent = session.artist || '';
-  el.mediaToggle.textContent = session.playback === 'playing' ? '\u2016' : '\u25B6';
+  el.mediaToggle.textContent = session.playback === 'playing' ? '\u23F8\uFE0E' : '\u25B6\uFE0E';
   el.mediaNext.disabled = !session.can_next;
   el.mediaPrev.disabled = !session.can_previous;
 }

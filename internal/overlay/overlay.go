@@ -174,24 +174,19 @@ func createOverlayWindow(x, y, width, height int32) (windows.HWND, error) {
 	}
 	titlePtr, _ := windows.UTF16PtrFromString("NovaBar Launcher")
 
-	modGdi32 := windows.NewLazySystemDLL("gdi32.dll")
-	procCreateSolidBrush := modGdi32.NewProc("CreateSolidBrush")
-	// RGB(20, 22, 26)
-	brush, _, _ := procCreateSolidBrush.Call(0x001A1614)
-
+	// Set background brush to 0 so Win32 doesn't paint a solid color block underneath.
 	wcx := win.WNDCLASSEX{
 		LpfnWndProc:   wndProc,
-		HbrBackground: windows.Handle(brush),
+		HbrBackground: 0,
 		LpszClassName: classPtr,
 	}
 	// Registering the same class twice reports ERROR_CLASS_ALREADY_EXISTS, which is
 	// expected when a second overlay is shown after the first was destroyed.
 	_, _ = win.RegisterClassEx(&wcx)
 
-	// WS_EX_TOOLWINDOW keeps it out of the taskbar and Alt+Tab. No WS_EX_NOACTIVATE:
-	// the launcher is meant to take keyboard focus, which is the whole point of a
-	// launcher, and it is transient so holding focus is not disruptive.
-	exStyle := uint32(win.WS_EX_TOOLWINDOW | win.WS_EX_TOPMOST)
+	// WS_EX_TOOLWINDOW keeps it out of the taskbar and Alt+Tab. 
+	// 0x00080000 is WS_EX_LAYERED, required to enable proper window transparency compositing.
+	exStyle := uint32(win.WS_EX_TOOLWINDOW | win.WS_EX_TOPMOST | 0x00080000)
 	style := uint32(win.WS_POPUP | win.WS_VISIBLE)
 
 	return win.CreateWindowEx(

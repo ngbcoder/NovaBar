@@ -38,9 +38,7 @@ const MAGNIFY_SPAN = 2; // tiles either side that are affected at all
 /**
  * Icon for an app.
  *
- * Real icon extraction is not wired up, so this derives a stable two-letter monogram.
- * Deterministic on purpose: an icon that changed on every update would make the dock
- * impossible to scan.
+ * Real icon extraction is wired up via Go backend, falling back to a stable two-letter monogram if needed.
  */
 function monogram(name) {
     const words = String(name || '').trim().split(/\s+/).filter(Boolean);
@@ -49,14 +47,32 @@ function monogram(name) {
     return (words[0][0] + words[1][0]).toUpperCase();
 }
 
-function makeTile({ label, glyph, running: isRunning, active, onClick, onContextMenu, onWheel, volume }) {
-    const btn = document.createElement('button');
-    btn.className = 'tile' + (active ? ' active' : '');
+/**
+ * A stable hue (0-359) for a name, so each monogram tile keeps its own colour
+ * between renders and between sessions instead of every tile being the same grey.
+ */
+function hueFor(name) {
+    let h = 0;
+    for (const ch of String(name || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return (h * 137) % 360;
+}
 
-    const g = document.createElement('div');
-    g.className = 'glyph';
-    g.textContent = glyph;
-    btn.appendChild(g);
+function makeTile({ label, glyph, icon, hue, running: isRunning, active, onClick, onContextMenu, onWheel, volume }) {
+    const btn = document.createElement('button');
+    btn.className = 'tile' + (active ? ' active' : '') + (icon ? ' has-icon' : '');
+    btn.style.setProperty('--h', String(hue ?? 210));
+
+    if (icon) {
+        const img = document.createElement('img');
+        img.className = 'glyph-img';
+        img.src = icon;
+        btn.appendChild(img);
+    } else {
+        const g = document.createElement('div');
+        g.className = 'glyph';
+        g.textContent = glyph;
+        btn.appendChild(g);
+    }
 
     if (isRunning) {
         const dot = document.createElement('span');
@@ -148,6 +164,8 @@ function buildTiles() {
         tiles.push(makeTile({
             label: app.name,
             glyph: monogram(app.name),
+            icon: app.icon, // Passes the extracted base64 icon data URI
+            hue: hueFor(app.proc_name || app.name),
             running: running.some((w) => w.proc_name === app.proc_name),
             active: running.some((w) => w.proc_name === app.proc_name && w.hwnd === activeHwnd),
             onClick: () => launch(app.target),
@@ -167,6 +185,7 @@ function buildTiles() {
         tiles.push(makeTile({
             label: nameFor(win),
             glyph: monogram(win.proc_name || win.title),
+            hue: hueFor(win.proc_name || win.title),
             running: true,
             active: win.hwnd === activeHwnd,
             onClick: () => focus(win.hwnd),
@@ -204,42 +223,65 @@ function wireMagnification() {
     const tiles = [...dock.querySelectorAll('.tile')];
     if (tiles.length === 0) return;
 
-    const reset = () => tiles.forEach((t) => {
-        t.style.transform = '';
-        t.style.marginLeft = '';
-        t.style.marginRight = '';
-    });
+    const reset = () => {
+        dock.classList.remove('magnifying');
+        tiles.forEach((t) => {
+            t.style.transform = '';
+            t.style.marginLeft = '';
+            t.style.marginRight = '';
+            t.style.removeProperty('--s');
+        });
+    };
 
-    dock.onpointermove = (e) => {
-        // offsetWidth is the untransformed layout; getBoundingClientRect on a scaled tile
-        // reports the scaled box, which would make the falloff drift as it runs.
+    let frame = 0;
+    let pointerX = 0;
+
+    const apply = () => {
+        frame = 0;
+
+        // Read everything first, then write, so the browser lays out once per frame
+        // instead of once per tile. offsetWidth is the untransformed layout; a scaled
+        // tile's bounding box would make the falloff drift as it runs.
         const base = tiles.map((t) => t.offsetWidth);
+        const centres = tiles.map((t) => {
+            const r = t.getBoundingClientRect();
+            return r.left + r.width / 2;
+        });
+
         let grew = false;
-
-        for (let i = 0; i < tiles.length; i++) {
-            const tile = tiles[i];
-            const r = tile.getBoundingClientRect();
-            const distance = Math.abs(e.clientX - (r.left + r.width / 2)) / (base[i] + 4);
-
-            let scale = 1;
-            if (distance <= MAGNIFY_SPAN) {
-                scale = 1 + (MAGNIFY_MAX - 1) * Math.cos((distance / MAGNIFY_SPAN) * (Math.PI / 2));
-            }
+        const scales = tiles.map((_, i) => {
+            const distance = Math.abs(pointerX - centres[i]) / (base[i] + 4);
+            if (distance > MAGNIFY_SPAN) return 1;
+            const scale = 1 + (MAGNIFY_MAX - 1) * Math.cos((distance / MAGNIFY_SPAN) * (Math.PI / 2));
             if (scale > 1.001) grew = true;
+            return scale;
+        });
 
+        if (!grew) { reset(); return; }
+
+        dock.classList.add('magnifying');
+        tiles.forEach((tile, i) => {
+            const scale = scales[i];
             tile.style.transform = `scale(${scale})`;
-            // Scaling alone grows each tile in place, so icons overlap and labels collide.
-            // In macOS the dock widens under the pointer for exactly that reason: half the
-            // growth goes to each side, taken from the tile's own margin.
+            // --s lets the tooltip counter-scale so its text is never blown up with the tile.
+            tile.style.setProperty('--s', scale.toFixed(3));
+            // Half the growth goes to each side, taken from the tile's own margin, so the
+            // dock widens under the pointer rather than icons overlapping.
             const extra = (base[i] * (scale - 1)) / 2;
             tile.style.marginLeft = `${extra}px`;
             tile.style.marginRight = `${extra}px`;
-        }
-
-        if (!grew) reset();
+        });
     };
 
-    dock.onpointerleave = reset;
+    dock.onpointermove = (e) => {
+        pointerX = e.clientX;
+        if (!frame) frame = requestAnimationFrame(apply);
+    };
+
+    dock.onpointerleave = () => {
+        if (frame) { cancelAnimationFrame(frame); frame = 0; }
+        reset();
+    };
 }
 
 let signature = '';

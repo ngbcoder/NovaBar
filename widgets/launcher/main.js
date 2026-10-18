@@ -48,6 +48,13 @@ function monogram(name) {
     return (words[0][0] + words[1][0]).toUpperCase();
 }
 
+/** A stable hue (0-359) per name, so each monogram keeps its colour and matches the dock. */
+function hueFor(name) {
+    let h = 0;
+    for (const ch of String(name || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return (h * 137) % 360;
+}
+
 function render() {
     if (results.length === 0) {
         list.replaceChildren(
@@ -62,6 +69,7 @@ function render() {
     const rows = results.map((item, i) => {
         const row = document.createElement('div');
         row.className = 'row' + (i === selected ? ' sel' : '');
+        row.style.setProperty('--h', String(hueFor(item.name)));
 
         const glyph = document.createElement('div');
         glyph.className = 'glyph';
@@ -82,7 +90,7 @@ function render() {
 
         const kind = document.createElement('div');
         kind.className = 'kind';
-        kind.textContent = item.kind === 'window' ? 'window' : 'app';
+        kind.textContent = item.kind === 'window' ? 'Window' : 'App';
 
         row.append(glyph, text, kind);
 

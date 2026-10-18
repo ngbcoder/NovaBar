@@ -5,19 +5,20 @@
   <title>NovaBar</title>
   <style>
     :root {
-      --bg: rgba(20, 22, 26, 0.82);
-      --accent: #3b82f6;
-      --text: #f3f4f6;
-      --dim: #9ca3af;
-      --hover: rgba(255, 255, 255, 0.10);
+      --bg: rgba(16, 18, 24, 0.72);
+      --bg-top: rgba(255, 255, 255, 0.05);
+      --accent: #8fa2ff;
+      --accent-ink: #0d1022;
+      --text: #eceef4;
+      --dim: #8d93a5;
+      --chip: rgba(255, 255, 255, 0.06);
+      --chip-hover: rgba(255, 255, 255, 0.13);
+      --hairline: rgba(255, 255, 255, 0.08);
+      --radius: 8px;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
-    /* The whole document ignores pointer events, and only real controls opt back in.
-       Seelen solves transparency the same way: no WM_NCHITTEST work at all, just
-       pointer-events in CSS. Inside a bar the reserved strip means there is nothing
-       underneath to click through to anyway, but this keeps the strip from swallowing
-       clicks meant for whatever is behind it before the reservation lands. */
+    /* Whole document is click-through; only real controls opt back in. */
     html, body {
       pointer-events: none;
       background: transparent;
@@ -28,6 +29,7 @@
       color: var(--text);
       font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
       font-size: 13px;
+      -webkit-font-smoothing: antialiased;
       -webkit-user-select: none;
       user-select: none;
       overflow: hidden;
@@ -37,47 +39,77 @@
       height: 40px;
       display: flex;
       align-items: center;
-      gap: 14px;
-      padding: 0 12px;
-      background: var(--bg);
-      backdrop-filter: blur(18px) saturate(140%);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+      gap: 16px;
+      padding: 0 10px;
+      background:
+        linear-gradient(180deg, var(--bg-top), transparent 60%),
+        var(--bg);
+      backdrop-filter: blur(24px) saturate(160%);
+      border-bottom: 1px solid var(--hairline);
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
     }
 
+    /* Brand */
     .brand {
       pointer-events: auto;
-      font-weight: 700;
-      color: var(--accent);
-      letter-spacing: 0.4px;
-      padding: 4px 8px;
-      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 10px 0 8px;
+      height: 28px;
+      border-radius: var(--radius);
+      font-weight: 650;
+      font-size: 13px;
+      letter-spacing: 0.2px;
       cursor: default;
+      transition: background 140ms ease;
+    }
+    .brand:hover { background: var(--chip); }
+    .brand::before {
+      content: "";
+      width: 14px;
+      height: 14px;
+      background: var(--accent);
+      /* four-point star */
+      clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
     }
 
-    .workspaces { display: flex; gap: 4px; }
+    /* Workspaces: inactive buttons are quiet, the active one stretches into an accent pill */
+    .workspaces {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 3px;
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.22);
+      box-shadow: inset 0 0 0 1px var(--hairline);
+    }
 
     .ws {
       pointer-events: auto;
-      min-width: 26px;
-      height: 24px;
-      padding: 0 7px;
-      border: 1px solid transparent;
-      border-radius: 6px;
-      background: rgba(255, 255, 255, 0.05);
+      min-width: 24px;
+      height: 22px;
+      padding: 0 8px;
+      border: none;
+      border-radius: 7px;
+      background: transparent;
       color: var(--dim);
-      font-size: 12px;
+      font: inherit;
+      font-size: 11.5px;
       font-weight: 500;
+      font-variant-numeric: tabular-nums;
       cursor: pointer;
-      transition: background 120ms ease, color 120ms ease;
+      transition: background 140ms ease, color 140ms ease, min-width 180ms ease;
     }
-    .ws:hover { background: var(--hover); color: var(--text); }
+    .ws:hover { background: var(--chip-hover); color: var(--text); }
     .ws.active {
+      min-width: 34px;
       background: var(--accent);
-      border-color: var(--accent);
-      color: #fff;
+      color: var(--accent-ink);
       font-weight: 700;
     }
 
+    /* Window title */
     .title {
       flex: 1;
       min-width: 0;
@@ -87,41 +119,100 @@
       overflow: hidden;
       text-overflow: ellipsis;
       font-size: 12px;
+      padding: 0 8px;
     }
 
-    .tray { display: flex; align-items: center; gap: 10px; }
+    .tray { display: flex; align-items: center; gap: 12px; }
 
-    .media { display: flex; align-items: center; gap: 8px; max-width: 260px; }
-    .media-info { min-width: 0; text-align: right; }
+    /* Media */
+    .media {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      max-width: 300px;
+      padding: 3px 12px 3px 4px;
+      border-radius: 999px;
+      background: var(--chip);
+      box-shadow: inset 0 0 0 1px var(--hairline);
+      flex-direction: row-reverse;
+    }
+    .media[hidden] { display: none; }
+
+    .media-info {
+      min-width: 0;
+      text-align: left;
+      line-height: 1.15;
+      padding-left: 6px;
+    }
     .media-title, .media-artist {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .media-title { font-size: 12px; font-weight: 600; }
-    .media-artist { font-size: 11px; color: var(--dim); }
+    .media-artist { font-size: 10.5px; color: var(--dim); }
+
     .media-btn {
       pointer-events: auto;
-      width: 26px; height: 26px;
+      flex: none;
+      width: 24px;
+      height: 24px;
       border: none;
-      border-radius: 6px;
-      background: var(--hover);
+      border-radius: 50%;
+      background: transparent;
       color: var(--text);
-      cursor: pointer;
-      font-size: 13px;
+      font-family: 'Segoe UI Symbol', 'Segoe UI', sans-serif;
+      font-size: 11px;
       line-height: 1;
+      cursor: pointer;
+      transition: background 140ms ease, transform 100ms ease;
     }
-    .media-btn:hover { background: rgba(255, 255, 255, 0.18); }
+    .media-btn:hover { background: var(--chip-hover); }
+    .media-btn:active { transform: scale(0.92); }
+    .media-btn:disabled { opacity: 0.3; cursor: default; background: transparent; transform: none; }
+    #media-toggle { background: var(--accent); color: var(--accent-ink); }
+    #media-toggle:hover { background: #a6b5ff; }
 
-    .clock { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 12px; }
+    /* Clock */
+    .clock {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      font-size: 12.5px;
+      padding: 0 6px;
+    }
 
+    /* Offline badge */
     .offline {
       pointer-events: auto;
-      color: #f87171;
-      font-size: 11px;
       display: none;
+      align-items: center;
+      gap: 6px;
+      height: 22px;
+      padding: 0 9px;
+      border-radius: 999px;
+      background: rgba(248, 113, 113, 0.14);
+      color: #fca5a5;
+      font-size: 11px;
+      font-weight: 600;
     }
-    .offline.show { display: block; }
+    .offline::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .offline.show { display: inline-flex; }
+
+    /* Keyboard focus */
+    .brand:focus-visible, .ws:focus-visible, .media-btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
+    }
   </style>
 </head>
 <body>
@@ -133,16 +224,16 @@
     <div class="title" id="window-title">NovaBar</div>
 
     <div class="tray">
-      <span class="offline" id="offline">offline</span>
+      <span class="offline" id="offline">Offline</span>
 
       <div class="media" id="media" hidden>
-        <button class="media-btn" id="media-prev" title="Previous track">&#9198;</button>
-        <button class="media-btn" id="media-toggle" title="Play or pause">&#9208;</button>
-        <button class="media-btn" id="media-next" title="Next track">&#9197;</button>
         <div class="media-info">
           <div class="media-title" id="media-title"></div>
           <div class="media-artist" id="media-artist"></div>
         </div>
+        <button class="media-btn" id="media-next" title="Next track" aria-label="Next track">&#9197;&#xFE0E;</button>
+        <button class="media-btn" id="media-toggle" title="Play or pause" aria-label="Play or pause">&#9208;&#xFE0E;</button>
+        <button class="media-btn" id="media-prev" title="Previous track" aria-label="Previous track">&#9198;&#xFE0E;</button>
       </div>
 
       <div class="clock" id="clock">--:--:--</div>

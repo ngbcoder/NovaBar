@@ -1,0 +1,49 @@
+[general]
+first_run = false
+log_level = 'info'
+rescue_hotkey = 'Ctrl+Alt+Shift+R'
+hide_taskbar = true
+
+[tiling]
+enabled = true
+default_layout = 'bsp'
+inner_gap = 8
+outer_gap = 12
+
+[[bars]]
+edge = 'top'
+size = 40
+enabled = true
+name = 'main'
+widget = 'bar'
+transparent = false
+
+[hotkeys]
+rescue = 'Ctrl+Alt+Shift+R'
+launcher = 'Win+Space'
+workspace_prev = 'Alt+Left'
+workspace_next = 'Alt+Right'
+settings = 'Ctrl+Alt+S'
+
+[[rules]]
+process = 'Taskmgr.exe'
+class = ''
+title = ''
+action = 'float'
+
+[[rules]]
+process = 'explorer.exe'
+class = 'OperationStatusWindow'
+title = ''
+action = 'float'
+
+[[rules]]
+process = 'TextInputHost.exe'
+class = ''
+title = ''
+action = 'ignore'
+
+[dock]
+enabled = true
+size = 56
+bottom_margin = 0
