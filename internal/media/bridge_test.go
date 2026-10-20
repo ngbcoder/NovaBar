@@ -21,6 +21,7 @@ func TestNewBridgeNeverPanics(t *testing.T) {
 	if b == nil {
 		t.Fatal("NewBridge returned a nil bridge")
 	}
+	defer releaseBridge(b)
 
 	// An available bridge needs a reason-free status; an unavailable one must explain
 	// itself, or the shell shows a hidden media area with no clue why.
@@ -38,17 +39,18 @@ func TestNewBridgeNeverPanics(t *testing.T) {
 		t.Errorf("Current reported no error but source = %q; it must not fabricate a session", session.Source)
 	}
 
-	// Transport must refuse rather than pretend.
-	if err := b.Command(CommandPlay); err == nil {
+	// Transport must refuse rather than pretend, unless there is a session to
+	// control. On a machine with nothing playing, refusing is the correct answer.
+	if err := b.Command(CommandPlay); err == nil && session.Source != "gsmtc" {
 		t.Error("Command succeeded on a bridge that reports no session")
 	}
 }
 
-// TestClassifyActivationError pins the distinctions that make the message useful.
+// TestDescribeActivationError pins the distinctions that make the message useful.
 //
 // A single opaque "activation failed" hides whether this is fixable, so each known
 // HRESULT has to produce its own wording.
-func TestClassifyActivationError(t *testing.T) {
+func TestDescribeActivationError(t *testing.T) {
 	cases := []struct {
 		name string
 		err  error
@@ -78,9 +80,9 @@ func TestClassifyActivationError(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classifyActivationError(tc.err)
+			got := describeActivationFailure(tc.err)
 			if !strings.Contains(got, tc.want) {
-				t.Errorf("classifyActivationError() = %q, want it to contain %q", got, tc.want)
+				t.Errorf("describeActivationFailure() = %q, want it to contain %q", got, tc.want)
 			}
 		})
 	}
@@ -104,8 +106,8 @@ func TestHarmlessROError(t *testing.T) {
 }
 
 // TestControllerRefusesWithoutBridge checks the contract the UI depends on: with no
-// bridge the controller reports no session and refuses transport, rather than showing a
-// permanently Stopped track that looks like a real paused player.
+// bridge the controller reports no session and refuses transport, rather than showing
+// a permanently Stopped track that looks like a real paused player.
 func TestControllerRefusesWithoutBridge(t *testing.T) {
 	c := NewController()
 
@@ -121,7 +123,19 @@ func TestControllerRefusesWithoutBridge(t *testing.T) {
 		t.Errorf("unavailable controller reported playback = %q; must be unknown", session.Playback)
 	}
 
-	if err := c.Refresh(); err == nil {
-		t.Error("Refresh succeeded with no media session")
+	// Refreshing only fails when there is no session to report. On a machine with
+	// music playing it is expected to succeed, so this cannot assert either way
+	// without knowing the environment.
+	if !c.Attached() {
+		if err := c.Refresh(); err == nil {
+			t.Error("Refresh succeeded with no media session")
+		}
+	}
+}
+
+// releaseBridge releases a bridge if it holds one.
+func releaseBridge(b Bridge) {
+	if r, ok := b.(interface{ Release() }); ok {
+		r.Release()
 	}
 }

@@ -1,6 +1,7 @@
 package media
 
 import (
+	"errors"
 	"sync"
 )
 
@@ -73,11 +74,18 @@ func NewController() *Controller {
 		current: MediaSession{Playback: StateUnknown, Source: "none"},
 	}
 
-	if bridge, err := NewBridge(); err == nil {
-		if session, err := bridge.Current(); err == nil {
-			c.bridge = bridge
-			c.current = session
-		}
+	bridge, err := NewBridge()
+	if err != nil {
+		return c
+	}
+
+	// The bridge is kept even when nothing is playing. "Nothing is playing" is a
+	// normal state, and dropping the bridge because of it would mean the shell
+	// never noticed the first song that started.
+	c.bridge = bridge
+
+	if session, err := bridge.Current(); err == nil {
+		c.current = session
 	}
 
 	return c
@@ -87,7 +95,22 @@ func NewController() *Controller {
 func (c *Controller) Attached() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.bridge != nil
+	return c.bridge != nil && c.bridge.Available()
+}
+
+// Reason explains why media data is not available, or "" when it is.
+//
+// The reason is what makes the difference between "the media area is empty" and
+// "the media area is empty because this Windows build has no media session stack".
+func (c *Controller) Reason() string {
+	c.mu.RLock()
+	bridge := c.bridge
+	c.mu.RUnlock()
+
+	if bridge == nil {
+		return errNoBridge.Error()
+	}
+	return bridge.Reason()
 }
 
 // GetCurrentSession returns the active media metadata.
@@ -109,6 +132,13 @@ func (c *Controller) Refresh() error {
 
 	session, err := bridge.Current()
 	if err != nil {
+		// Nothing playing is not a failure of the shell. It does mean the media
+		// area has to go away rather than keep showing a track that finished.
+		if errors.Is(err, errNoSession) {
+			c.mu.Lock()
+			c.current = MediaSession{Playback: StateUnknown, Source: "none"}
+			c.mu.Unlock()
+		}
 		return err
 	}
 
@@ -133,17 +163,22 @@ func (c *Controller) Command(cmd TransportCommand) error {
 	}
 
 	// Reflect the change locally so the UI updates without waiting for the next
-	// system media session change notification.
+	// system media session change notification. The poll corrects it if the player
+	// disagreed.
 	c.mu.Lock()
 	switch cmd {
-	case CommandPlay, CommandTogglePlay:
-		if cmd == CommandPlay {
-			c.current.Playback = StatePlaying
-		}
+	case CommandPlay:
+		c.current.Playback = StatePlaying
 	case CommandPause:
 		c.current.Playback = StatePaused
 	case CommandStop:
 		c.current.Playback = StateStopped
+	case CommandTogglePlay:
+		if c.current.Playback == StatePlaying {
+			c.current.Playback = StatePaused
+		} else {
+			c.current.Playback = StatePlaying
+		}
 	}
 	c.mu.Unlock()
 

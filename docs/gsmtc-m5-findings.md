@@ -1,7 +1,11 @@
 # M5 findings: the GSMTC media bridge
 
-Notes from actually trying to reach `GlobalSystemMediaTransportControlsSessionManager`
-from Go. Most of this is about failures, because the failures were the expensive part.
+Notes from reaching `GlobalSystemMediaTransportControlsSessionManager` from Go. Most
+of this is about failures, because the failures were the expensive part.
+
+**This is finished.** The bridge reads sessions, playback state and transport
+capabilities, and drives the transport. What follows is how it got there, and what was
+wrong along the way, because the wrong parts are the ones worth keeping.
 
 ## Short version
 
@@ -9,11 +13,13 @@ from Go. Most of this is about failures, because the failures were the expensive
   a false premise, so the no-cgo constraint still holds tree-wide.
 - **GSMTC was never unavailable.** An earlier version of this file blamed the machine; the
   real cause was a wrong class name. Section 4 is the post-mortem.
-- Activation now works and the bridge attaches. **Session property reads are not written**,
-  because they need five more hand-written vtables plus an async property round trip, and a
-  wrong slot terminates the process rather than returning an error.
-- `windows-rs` was evaluated as a way to avoid that marshalling and **is Rust-only**; there
-  are no Go bindings.
+- **The missing IID was in the metadata the operating system ships with.** Not in the
+  GUID heap, which holds one entry, but in a `GuidAttribute` on each interface. Section 5.
+- **Nothing is written from documentation any more.** `internal/winmd` reads the metadata,
+  and a test fails if a constant and the metadata disagree.
+- **The media properties are not a property bag.** The session hands back an object with
+  the title, artist and album on it. Section 7.
+- **`windows-rs` was evaluated and is Rust-only**; there are no Go bindings.
 
 ## 1. go-ole does not need cgo
 
@@ -120,37 +126,64 @@ ole.RoGetActivationFactory(className, iidUnknown)
 interface recalled from documentation — an unverified IID is the same mistake one level
 down.
 
-### Verified facts for whoever resumes this
+## 5. The missing IID was in the metadata all along
 
-Read from the installed Windows SDK, not guessed. The C++/WinRT header
-`C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt\Windows.Media.Control.h`
-contains every `...Vtbl` struct, and vtable slots are the declaration order within them.
+This is the part that had everyone looking in the wrong place. The blocker was the IID of
+`IGlobalSystemMediaTransportControlsSessionManagerStatics`, and the previous version of
+this file said:
 
-| Fact | Value |
-| --- | --- |
-| Class name | `Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager` |
-| `RoActivateInstance` | `E_NOTIMPL` — not directly activatable |
-| Statics interface | `IGlobalSystemMediaTransportControlsSessionManagerStatics` |
-| Manager interface | `IGlobalSystemMediaTransportControlsSessionManager` |
-| Session interface | `IGlobalSystemMediaTransportControlsSession` |
+> The SDK header declares `IID_..._Statics = __uuidof(...)` but `__uuidof` resolves from
+> `Windows.Media.winmd`, so the literal GUID is not in the header, and it did not surface
+> in documentation searches.
 
-Slots, all IInspectable-derived so IUnknown 0-2 and IInspectable 3-5:
+And then:
 
-| Interface | Slot | Member |
-| --- | --- | --- |
-| Statics | 6 | `RequestAsync` → `IAsyncOperation<SessionManager>` |
-| Manager | 6 | `GetCurrentSession()` |
-| Manager | 7 | `GetSessions()` |
-| Session | 6 | `get_SourceAppUserModelId` |
-| Session | 7 | `TryGetMediaPropertiesAsync` (async, `IAsyncOperation<IPropertySet>`) |
-| Session | 8 | `GetTimelineProperties` |
-| Session | 9 | `GetPlaybackInfo` |
-| Session | 10 | `TryPlayAsync` |
-| Session | 11 | `TryPauseAsync` |
-| Session | 12 | `TryStopAsync` |
+> Where to get the IID cheaply: parse the `InterfaceDef` table's GUID heap from
+> `Windows.Media.winmd`.
 
-`IAsyncOperation<T>` is IInspectable plus `put_Completed` 6, `get_Completed` 7,
-**`GetResults` 8**.
+**There is no `InterfaceDef` table, and the GUID heap holds one entry.** WinRT metadata
+is ECMA-335 metadata, and in ECMA-335 the GUID heap is for module and assembly
+identifiers. An interface's identifier is not in it.
+
+Where it is: **a `GuidAttribute` on the interface's type definition**, whose value blob
+holds the identifier. The GUID heap's single entry is the `GuidAttribute` *type's* own
+identifier.
+
+The metadata the operating system ships with is at:
+
+```
+C:\Windows\System32\WinMetadata\Windows.Media.winmd
+C:\Windows\System32\WinMetadata\Windows.Foundation.winmd
+```
+
+Reading it is a normal PE plus ECMA-335 metadata parse, which `internal/winmd` now does.
+There is no need for `mdapi`, `DIA` or the SDK.
+
+The identifier, for the record:
+
+```
+IGlobalSystemMediaTransportControlsSessionManagerStatics = 2050c4ee-11a0-57de-aed7-c97c70338245
+```
+
+## 6. The metadata also settles the slot order
+
+The previous version of this file listed the vtable slots by hand, read out of an SDK
+header that is not installed here. The metadata says the same thing, and says it in a form
+that cannot be misread: an interface's methods appear in the order the vtable has them,
+and the ABI puts the first one at slot 6.
+
+So the slots are not written down either. `internal/media` names a method, the test looks
+the method up in the metadata, and the slot constant is checked against it. The
+declaration order is also how the interface's own method list is read, so the two cannot
+disagree.
+
+Two things the metadata corrected, both of which would have been wrong from memory:
+
+- **`AsyncStatus` is not in value order.** The members are declared `Canceled, Completed,
+  Error, Started` and their values are `2, 1, 3, 0`. Reading the values from the
+  constants table is the only way to get them right.
+- **`IAsyncOperation` does not derive from `IAsyncInfo`** in the metadata, so `GetResults`
+  is at slot 8 and not at 13.
 
 ### Two bugs that cost most of the effort
 
@@ -162,88 +195,82 @@ index 6 was not `ActivateInstance`. Both were garbage and both faulted at
 `0xffffffffffffffff`. This was almost certainly the single biggest reason the earlier
 attempts looked like deep ABI problems rather than an indexing mistake.
 
+`internal/winrt` does it once, in one place, and says so in a comment.
+
 **2. `GetIids` stride.** `IID** iids` in the ABI is a pointer to a *contiguous array of
 16-byte IID structs*, not an array of pointers. Walking it with an 8-byte stride and
 dereferencing each element reads garbage.
 
-### What remains, precisely
+## 7. The media properties are not a property bag
 
-One identifier is still missing: **the IID of
-`IGlobalSystemMediaTransportControlsSessionManagerStatics`**. The SDK header declares
-`IID_..._IGlobalSystemMediaTransportControlsSessionManagerStatics = __uuidof(...)` but
-`__uuidof` resolves from `Windows.Media.winmd`, so the literal GUID is not in the header,
-and it did not surface in documentation searches.
+The previous version of this file was sure that reading a session's title needed
+`IPropertySet` and `IMapView`, "several more hand-written vtables on top of the
+activation that now works", and that this was the largest remaining piece.
 
-Once that IID is known the chain is short and every slot is verified:
+It is not. The metadata says:
 
-1. `RoGetActivationFactory(className, staticsIID)` → the factory as statics
-2. slot 6 `RequestAsync` → `IAsyncOperation<SessionManager>`
-3. slot 8 `GetResults` → the manager
+```
+IGlobalSystemMediaTransportControlsSession.TryGetMediaPropertiesAsync
+    -> IAsyncOperation<GlobalSystemMediaTransportControlsSessionMediaProperties>
+```
+
+The session hands back a media properties object with `get_Title`, `get_Artist` and
+`get_AlbumTitle` on it. One more interface, no property bag, no `IMapView`, and no
+`IVectorView` unless the session list is wanted as well.
+
+## 8. How it was finished
+
+The chain, all of it read from the metadata:
+
+1. `RoGetActivationFactory(className, staticsIID)` → the statics object
+2. statics slot 6 `RequestAsync` → `IAsyncOperation<SessionManager>`
+3. `IAsyncOperation` slot 8 `GetResults` → the manager
 4. manager slot 6 `GetCurrentSession` → the session, or nil when nothing is playing
-5. session slot 9 `GetPlaybackInfo` → status and capability flags
-6. session slot 8 `GetTimelineProperties` → position and duration
-7. session slots 10/11/12 → play, pause, stop
-8. session slot 7 `TryGetMediaPropertiesAsync` → title, artist, album
+5. session slot 6 `get_SourceAppUserModelId` → the owning application
+6. session slot 7 `TryGetMediaPropertiesAsync` → `GetResults` → title, artist, album
+7. session slot 8 `GetTimelineProperties` → position and duration
+8. session slot 9 `GetPlaybackInfo` → status and the transport capabilities
+9. session slots 10, 11, 12, 16, 17, 20 → play, pause, stop, next, previous, toggle
 
-Steps 5-7 need three more vtables (`PlaybackInfo`, `PlaybackControls`,
-`TimelineProperties`), whose slots are in the same SDK header. Step 8 needs
-`IAsyncOperation` status polling and `IPropertySet` property reads, which is the largest
-remaining piece.
+Two decisions are worth writing down.
 
-Where to get the IID cheaply: parse the `InterfaceDef` table's GUID heap from
-`Windows.Media.winmd`, or use `DIA`/metadata tooling. Avoid guessing it — an unverified IID
-is the same class of mistake as the wrong class name, and it fails as
-`E_NOINTERFACE`, which reads plausibly.
+**One thread.** WinRT initializes per thread, and the daemon answers media over RPC on
+whichever goroutine the request arrived on. The bridge owns a thread, initializes the
+runtime on it, and runs every call there. A COM apartment is per-thread, and a callback
+delivered to a thread without one is a crash.
 
-### Why this is still not written
+**Polling, not events.** The stack publishes `CurrentSessionChanged`, `PlaybackInfoChanged`
+and `MediaPropertiesChanged`, and the previous version of this file recommended using
+`ole.NewCallback` for them. It does not: the daemon re-reads the session every couple of
+seconds and broadcasts the result. Polling cannot fault, cannot deliver a callback to a
+thread whose apartment has gone away, and at this interval nobody can tell the difference.
 
-Every step above is a raw vtable call, and a wrong signature terminates the process rather
-than returning an error. That has now happened three times. The cost is not "writing code",
-it is that each verification cycle costs a process launch, and one of the four remaining
-pieces — the media-properties property bag — cannot be tested until the earlier three are
-right. Shipping a chain that cannot be exercised end to end is how a desktop shell's
-message-pump thread ends up dead.
+## 9. What is deliberately left out
 
-`classifyActivationError` still names `REGDB_E_CLASSNOTREG`, `E_NOINTERFACE` and
-`E_ACCESSDENIED` separately, because whether a failure is fixable is the only thing a user
-can act on.
+- **Subscribing to the change events.** Polling covers it, and a callback is the part
+  that can cross a thread boundary and fault. Revisit if the polling interval ever has to
+  get much shorter.
+- **The session list.** `GetSessions` is one slot away and is not used: the bar shows the
+  current session, which is what the media area was for.
+- **Thumbnails.** `get_Thumbnail` is an `IRandomAccessStreamReference`, which means
+  another interface and a stream. The pill shows text.
 
-## 5. What is deliberately not implemented
+## 10. How to verify it
 
-Reading a session's title, artist, album, playback status and timeline needs
-`IPropertySet`/`IMapView` property access, plus `IVectorView` to enumerate sessions and
-`IMediaPlaybackControl` to drive transport — several more hand-written vtables on top of
-the activation that now works.
+`tools/mediaprobe` prints what the bridge can see, and takes a command to send:
 
-That code is **not written**, deliberately. It needs at least five more vtables —
-`IActivationFactory`, `IAsyncOperation`, the manager interface, the session interface and
-`IPropertySet`/`IMap` — and a mistake in hand-rolled marshalling terminates the process
-rather than returning an error, demonstrated twice: a bad `ROACTIVATIONRO` struct produced
-a `0xc0000005` access violation inside the Go runtime, and assuming the factory exposed
-`IActivationFactory` faulted at `0xffffffffffffffff`.
+```
+go run ./tools/mediaprobe
+go run ./tools/mediaprobe play
+```
 
-`windows-rs` would have supplied metadata-generated bindings and removed that risk
-entirely. It is Rust-only; there is no Go equivalent, so the ABI has to be written by hand.
+`tools/windump` prints the metadata itself, which is where every identifier and slot
+came from:
 
-A crash in `NewBridge` would hit the daemon's pinned message-pump thread, which is
-exactly what the watchdog exists to prevent. Untestable code that can crash the shell is
-worse than an honest "not yet".
+```
+go run ./tools/windump C:\Windows\System32\WinMetadata\Windows.Media.winmd Windows.Media.Control
+```
 
-So `Current` returns `errNoSession` and `Command` refuses, and `Available()` is `false`
-even when the manager is attached — because a bridge that cannot read a session is not
-available, and reporting `true` would render an empty media area that looks like a bug
-rather than unfinished work.
-
-### To finish it
-
-1. Confirm activation succeeds somewhere GSMTC is present. Until that happens the read
-   path cannot be tested, and this is the blocking unknown.
-2. Prefer `IPropertySet` over `IMapView`; the former is the documented way to read GSMTC
-   state and has one fewer interface to marshal.
-3. Use `ole.NewCallback` for the `CurrentSessionChanged` event, as
-   `wailsapp/go-webview2` does for its own COM callbacks. It is the only proven pattern in
-   this tree.
-4. Poll rather than subscribe at first. Polling is testable against a known session and
-   cannot leak a callback across a thread boundary; event handling can.
-5. Register a COM callback object on a thread that stays pinned. The COM apartment is
-   per-thread, so a callback delivered to a GC'd thread is a crash.
+And the tests in `internal/media` re-read the metadata and fail if a constant and the
+metadata ever disagree. That is the whole defence: the wrong class name in this area
+cost a day, and an identifier read from memory would have cost the same.

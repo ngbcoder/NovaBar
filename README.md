@@ -20,7 +20,8 @@ Go 1.22+ to build. No other dependencies.
 
 ## Status
 
-Milestones 1–4 are complete. Milestone 5 is partial.
+Milestones 1–7 are complete, and so is M12, which is the media work that M5 left half
+finished.
 
 Three surfaces are live, all WebView2 hosted inside the shell's own windows and all
 talking to the daemon over authenticated, permission-checked JSON-RPC:
@@ -34,11 +35,13 @@ talking to the daemon over authenticated, permission-checked JSON-RPC:
 Verified together on a two-bar layout: both surfaces attach, connect, receive only the
 permissions their manifests declare, and subscribe to their topics.
 
-Still to do: session property reads in the GSMTC media bridge. Activation now works and is
-tested — an earlier wrong class name was the real cause, not the machine — but reading a
-session's title, artist and transport state is not implemented, so the media area stays
-hidden. App pinning for the dock is now done; see
-[docs/gsmtc-m5-findings.md](docs/gsmtc-m5-findings.md) for what remains on media.
+The media area is live too. The shell reads the current session's title, artist, album,
+playback state, position and transport capabilities, and drives play, pause, stop, next
+and previous. None of that is guessed: the interface identifiers and the vtable slot
+order come from the metadata the operating system ships, and a test re-reads that
+metadata so the two cannot drift. See
+[docs/gsmtc-m5-findings.md](docs/gsmtc-m5-findings.md) for how it was finished and
+what it cost.
 
 <p align="center">
   <img src="TargetLook.png" alt="TargetLook" width="420">
@@ -173,7 +176,9 @@ internal/hotkey   global hotkey registration
 internal/watchdog detached recovery process
 internal/webview  WebView2 surfaces hosted in the shell's own windows
 internal/overlay  transient surfaces that reserve no work area (the launcher)
-internal/media    GSMTC bridge; WinRT activation, session reads not yet implemented
+internal/media    GSMTC bridge: session reads, playback state, transport control
+internal/winrt    the slice of the COM and WinRT ABI the media bridge needs
+internal/winmd    reads Windows Runtime metadata, for identifiers and slot order
 internal/volume   per-application audio volume via Core Audio (WASAPI)
 ```
 
@@ -267,14 +272,14 @@ away on the board.
 | M2 — Pure-function tiling engine | Done | `core`, `tiling` |
 | M3 — AppBar, workspaces, taskbar management | Done | `win32`, `shell` |
 | M4 — WebView2 UI, widget platform | Done | `ui`, `widgets` |
-| M5 — App launcher, GSMTC media | Partial | `shell`, `ui` |
+| M5 — App launcher, GSMTC media | Done | `shell`, `ui` |
 | M6 — Settings menu | Done | `ui`, `widgets`, `safety` |
 | M7 — Per-app volume | Done | `audio`, `win32` |
 | M8 — Keyboard window management | Next | `core`, `power-user`, `ui` |
 | M9 — Multi-monitor correctness | Planned | `win32`, `multi-monitor` |
 | M10 — HiDPI and per-monitor scaling | Planned | `multi-monitor`, `accessibility`, `ui` |
 | M11 — Accessibility | Planned | `accessibility`, `ui` |
-| M12 — GSMTC media reads | Planned | `media`, `winrt` |
+| M12 — GSMTC media reads | Done | `media`, `winrt` |
 | M13 — App menu: grid, jump lists, recent files | Planned | `shell`, `ui` |
 | M14 — Global file search | Planned | `search`, `ui` |
 | M15 — Command palette | Planned | `power-user`, `ui` |
@@ -290,6 +295,9 @@ away on the board.
 | M25 — Files app | Planned | `explorer`, `files` |
 | M26 — Full shell replacement | Option | `explorer`, `windows-shell` |
 <!-- ROADMAP:END -->
+
+The M5 and M12 rows were changed by hand: the work is done in the tree, and the board
+still has to be told. The next run of the action will set them back until it is.
 
 The notes that follow explain the milestones where the reasoning is not obvious from the
 title.
@@ -340,14 +348,16 @@ is an interface that has to be rebuilt.
 
 ### M12 — GSMTC media reads
 
-Finishes M5. Activation works; reading a session does not. The remaining work is one
-identifier — the IID of the statics interface — followed by a chain of hand-written vtable
-calls.
+**Shipped.** This finishes M5. Activation worked; reading a session did not. The
+obstacle was one identifier — the IID of the statics interface — and it turned out to
+be sitting in the metadata the operating system ships with, in a place nobody had
+looked: not in the GUID heap, which holds one entry, but in a `GuidAttribute` on each
+interface.
 
-`docs/gsmtc-m5-findings.md` has every slot, the two bugs that cost the most time, and
-where to get the IID. The obstacle is that a wrong vtable signature terminates the process
-rather than returning an error, so each step has to be verified before the next is
-attempted.
+`docs/gsmtc-m5-findings.md` has the whole story, including the parts that are now
+wrong. The identifiers and the vtable order are no longer written down from
+documentation at all: `internal/winmd` reads the metadata, and a test fails if the
+constants and the metadata ever disagree.
 
 ### M13 — App menu: grid, jump lists, recent files
 
@@ -432,6 +442,28 @@ here and the only one that means truly owning the desktop: a long tail of shell 
 and weeks of work.
 
 Everything above it is worth doing whether or not this ever happens.
+
+## Media sessions (M5, M12)
+
+Shipped. The bar shows the session that is playing: title, artist, playback state and
+the transport buttons. The daemon re-reads it every couple of seconds and broadcasts
+the change, so the bar follows what is playing without the widget polling.
+
+What it does, and how:
+
+| Piece | How it was done |
+| --- | --- |
+| Identifiers | Read from `C:\Windows\System32\WinMetadata\Windows.Media.winmd`, the metadata the operating system ships. `internal/winmd` parses it: the PE container, the heaps, and the tables. |
+| Slot order | Read from the same metadata. The ABI puts an interface's first method at slot 6, and the metadata says which method that is. |
+| No guesses | A test re-reads the metadata and fails if an identifier or a slot drifts from it. The wrong class name in this area cost a day; a wrong identifier would have cost the same. |
+| One thread | WinRT initialises per thread, and the daemon answers media over RPC on whichever goroutine the request arrived on. The bridge owns a thread, and every call into the runtime happens on it. |
+| Polling, not events | The stack publishes change events, but a callback crossing a thread boundary is where the crashes in this area came from. Polling cannot fault. |
+| Honest about silence | No session is a normal state, not an error. The shell says so rather than showing an empty player. |
+
+The media properties turned out to be simpler than expected: the session hands back a
+media properties object with the title, artist and album on it, so there is no property
+bag to marshal after all.
+
 ## Settings menu (M6)
 
 Shipped. Opens with `Ctrl+Alt+S`, an in-shell overlay with the same shape as the

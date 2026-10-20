@@ -42,6 +42,13 @@ const eventDebounce = 50 * time.Millisecond
 // statsPollInterval is the pub/sub heartbeat period for system.stats.
 const statsPollInterval = 2 * time.Second
 
+// mediaPollInterval is how often the media session is re-read.
+//
+// The media stack does publish change events, but subscribing to one means a callback
+// crossing a thread boundary, and that is where the crashes in this area came from.
+// Polling cannot fault.
+const mediaPollInterval = 2 * time.Second
+
 // daemon owns the long-lived components and their shutdown ordering.
 type daemon struct {
 	cfg     config.Config
@@ -140,6 +147,7 @@ func Run() {
 	go d.eventPump()
 	go d.statsPump()
 	go d.configPump()
+	go d.mediaPump()
 
 	log.Println("[NovaBar] Running message pump. Use 'shellctl --rescue' or the rescue hotkey to exit.")
 
@@ -224,7 +232,11 @@ func (d *daemon) setup() error {
 
 	d.media = media.NewController()
 	if !d.media.Attached() {
-		log.Printf("[NovaBar] Media: no Windows media session bridge attached; transport controls unavailable\n")
+		reason := d.media.Reason()
+		if reason == "" {
+			reason = "no Windows media session manager available"
+		}
+		log.Printf("[NovaBar] Media: %s; transport controls unavailable\n", reason)
 	}
 
 	// Per-application volume. The controller pins its own COM thread, so it is safe to
@@ -1256,6 +1268,52 @@ func (d *daemon) statsPump() {
 			"goroutines":      runtime.NumGoroutine(),
 		})
 	}
+}
+
+// mediaPump keeps the media session current.
+//
+// The media stack does publish change events, but subscribing to one means a callback
+// crossing a thread boundary, and that is where the crashes in this area came from.
+// Polling is dull and cannot fault, and a couple of seconds is well inside what a
+// person notices.
+func (d *daemon) mediaPump() {
+	if d.media == nil {
+		return
+	}
+
+	ticker := time.NewTicker(mediaPollInterval)
+	defer ticker.Stop()
+
+	previous := d.media.GetCurrentSession()
+	for range ticker.C {
+		// A refresh that fails is usually "nothing is playing", and the controller
+		// clears the session in that case, so the comparison below still sees it.
+		_ = d.media.Refresh()
+
+		current := d.media.GetCurrentSession()
+		if !mediaSessionChanged(previous, current) {
+			continue
+		}
+		previous = current
+		d.rpcs.Broadcast(rpc.TopicMediaState, current)
+	}
+}
+
+// mediaSessionChanged reports whether two sessions differ in a way the user can see.
+//
+// The position is deliberately not compared. It moves continuously, so comparing it
+// would turn every tick into a broadcast.
+func mediaSessionChanged(a, b media.MediaSession) bool {
+	return a.Source != b.Source ||
+		a.AppID != b.AppID ||
+		a.Title != b.Title ||
+		a.Artist != b.Artist ||
+		a.Album != b.Album ||
+		a.Playback != b.Playback ||
+		a.CanPlay != b.CanPlay ||
+		a.CanPause != b.CanPause ||
+		a.CanNext != b.CanNext ||
+		a.CanPrevious != b.CanPrevious
 }
 
 // configPump applies live config reloads.
