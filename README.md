@@ -254,18 +254,44 @@ sdk.subscribe("windows.updated", onWindows);
 
 ## Roadmap
 
-<iframe
-  src="https://basalt-lancer-b02.notion.site/0a5506f72fd540acaa0a0123c9c29d80?v=3ffd677f1c2f817bb34f000ced4524cd"
-  width="100%" height="620" frameborder="0"
-  style="border-radius:10px"
-  title="NovaBar Roadmap"
-></iframe>
+The board is the source of truth: [NovaBar Roadmap on Notion](https://basalt-lancer-b02.notion.site/0a5506f72fd540acaa0a0123c9c29d80?v=3ffd677f1c2f817bb34f000ced4524cd).
+The table below is generated from it by a scheduled GitHub Action, so the two cannot
+drift. **Labels** are the cross-cutting themes, the ones that appear on more than one
+milestone, so a question like which milestones touch the widget platform is one filter
+away on the board.
 
-The board above is the source of truth and is grouped by Status. The
-**Labels** on each milestone are the cross-cutting themes that appear on more than one
-of them. The notes that follow explain the ones where the reasoning is not obvious from
-the title.
+<!-- ROADMAP:BEGIN -->
+| Milestone | State | Labels |
+| --- | --- | --- |
+| M1 — Win32 core, safety foundations | Done | `core`, `win32`, `safety` |
+| M2 — Pure-function tiling engine | Done | `core`, `tiling` |
+| M3 — AppBar, workspaces, taskbar management | Done | `win32`, `shell` |
+| M4 — WebView2 UI, widget platform | Done | `ui`, `widgets` |
+| M5 — App launcher, GSMTC media | Partial | `shell`, `ui` |
+| M6 — Settings menu | Done | `ui`, `widgets`, `safety` |
+| M7 — Per-app volume | Done | `audio`, `win32` |
+| M8 — Keyboard window management | Next | `core`, `power-user`, `ui` |
+| M9 — Multi-monitor correctness | Planned | `win32`, `multi-monitor` |
+| M10 — HiDPI and per-monitor scaling | Planned | `multi-monitor`, `accessibility`, `ui` |
+| M11 — Accessibility | Planned | `accessibility`, `ui` |
+| M12 — GSMTC media reads | Planned | `media`, `winrt` |
+| M13 — App menu: grid, jump lists, recent files | Planned | `shell`, `ui` |
+| M14 — Global file search | Planned | `search`, `ui` |
+| M15 — Command palette | Planned | `power-user`, `ui` |
+| M16 — Window previews and groups | Planned | `ui`, `shell` |
+| M17 — Layout presets | Planned | `tiling`, `ui` |
+| M18 — Per-app window memory | Planned | `persistence`, `ui` |
+| M19 — Notifications | Planned | `shell`, `notifications` |
+| M20 — Clipboard manager | Planned | `clipboard`, `power-user` |
+| M21 — System mixer panel | Planned | `audio`, `ui` |
+| M22 — Screenshot tool | Planned | `power-user`, `ui` |
+| M23 — Persistence and theming | Planned | `persistence`, `ui` |
+| M24 — Plugin API for widgets | Planned | `widgets`, `plugin` |
+| M25 — Files app | Planned | `explorer`, `files` |
+| M26 — Full shell replacement | Option | `explorer`, `windows-shell` |<!-- ROADMAP:END -->
 
+The notes that follow explain the milestones where the reasoning is not obvious from the
+title.
 ### M8 — Keyboard window management
 
 **The tiling engine works, and there is no way to drive it.** The only hotkeys are

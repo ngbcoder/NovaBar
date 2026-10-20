@@ -50,12 +50,34 @@ removes the safety net and leaves a stale work area behind.
 | M14 Full shell replacement | An **option, not a requirement**. |
 
 The README carries the same table with a section per milestone describing what each one
-means, and embeds the Notion board as a live iframe. That board is the source of truth:
-<https://basalt-lancer-b02.notion.site/0a5506f72fd540acaa0a0123c9c29d80?v=3ffd677f1c2f817bb34f000ced4524cd>
+means, and the table itself is **generated** from the Notion board by `tools/roadgen` and
+kept in step by `.github/workflows/roadmap.yml`, which runs on a schedule and whenever
+the generator changes.
 
 **Labels** on each milestone are the cross-cutting themes, the ones that appear on more
 than one milestone, so a question like "which milestones touch the widget platform?" is
 one filter away.
+
+The generator uses a Notion **internal integration token** (`secret_…`), not a personal
+access token. An internal integration sees only the pages shared with it; a PAT would
+grant the whole workspace, which is too much to put in a repository secret for a public
+repo.
+
+To set it up: create an internal integration with the *Read content* capability at
+`notion.so/my-integrations`, share the "NovaBar Roadmap" database with it through the
+database's `…` menu → Connections, then add the token as the repository secret
+`NOTION_TOKEN`.
+
+The sharing step is the one that gets missed, and its symptom is an empty result rather
+than an error. The tool refuses to blank the README in that case rather than quietly
+wiping the table.
+
+**A Notion page cannot be embedded in a GitHub README.** Notion serves
+`X-Frame-Options: SAMEORIGIN` and a `frame-ancestors` list containing only Notion's own
+domains, so the browser refuses the frame even where the tag renders. An iframe was
+tried and cannot work; the generated table is the working equivalent.
+
+The board: <https://basalt-lancer-b02.notion.site/0a5506f72fd540acaa0a0123c9c29d80?v=3ffd677f1c2f817bb34f000ced4524cd>
 
 ### Shipped features
 

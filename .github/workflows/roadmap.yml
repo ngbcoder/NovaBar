@@ -1,0 +1,65 @@
+name: Roadmap
+
+# Keeps the roadmap table in README.md in step with the Notion board.
+#
+# The board is the source of truth. This reads it and rewrites the generated region of
+# the README, committing only when something actually changed, so a run that finds no
+# drift leaves no trace in the history.
+#
+# The Notion token is a repository secret. It is never written to the repository and
+# never appears in a log: the tool only ever reads it into an Authorization header.
+#
+# To set it up:
+#   1. Create an internal integration at https://www.notion.so/my-integrations.
+#      Give it read content and insert comments, and share the NovaBar Roadmap
+#      database with it.
+#   2. Add the token as a repository secret named NOTION_TOKEN:
+#      Settings -> Secrets and variables -> Actions -> New repository secret.
+#   3. Share the "NovaBar Roadmap" database with the integration, or the query returns
+#      nothing and the tool refuses to blank the README.
+
+on:
+  schedule:
+    # Daily, a few minutes past the hour and off the top of the hour so it does not
+    # join the stampede of every scheduled job on GitHub's runners.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    # Run it by hand from the Actions tab after changing the board.
+  push:
+    paths:
+      - 'tools/roadgen/**'
+      - '.github/workflows/roadmap.yml'
+    # A change to the generator should regenerate the table immediately, rather than
+    # leaving a stale table until the next scheduled run.
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Rewrite the roadmap table from Notion
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        run: go run ./tools/roadgen -write
+
+      - name: Commit the update
+        run: |
+          if git diff --quiet -- README.md; then
+            echo "The README is already in step with the Notion board."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "Update the roadmap table from Notion"
+          git push
