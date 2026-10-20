@@ -21,7 +21,7 @@ Go 1.22+ to build. No other dependencies.
 ## Status
 
 Milestones 1–7 are complete, and so is M12, which is the media work that M5 left half
-finished.
+finished, and M9, which is the multi-monitor correctness work.
 
 Three surfaces are live, all WebView2 hosted inside the shell's own windows and all
 talking to the daemon over authenticated, permission-checked JSON-RPC:
@@ -319,16 +319,28 @@ Planned, all from a configurable keymap:
 Focus and move are the same operation in most tiling window managers, distinguished only
 by intent, so they are worth doing together.
 
-### M9 — Multi-monitor correctness
+### M9 - Multi-monitor correctness
 
-Bar geometry uses `GetSystemMetrics`, which reports the **primary display only**, rather
-than `MONITORINFO` per monitor. A window dragged to a second screen lands in the wrong
-place, and per-monitor work areas are not honoured.
+**Shipped.** Bar geometry came from `GetSystemMetrics`, which reports the **primary
+display only**, rather than `MONITORINFO` per monitor. A window dragged to a second
+screen landed in the wrong place, and per-monitor work areas were not honoured.
 
-A bug rather than a feature, and it blocks any real multi-monitor use, which is why it is
-a milestone of its own rather than a footnote.
+What changed:
 
-### M10 — HiDPI and per-monitor scaling
+| Piece | How |
+| --- | --- |
+| Bar geometry | The bars are placed against a rectangle that can be the whole desktop or the primary display, chosen by `general.bar_scope`. The default is the primary display, because the shell reserves the work-area strip only for the display the bar's rectangle starts on: a bar drawn across the desktop is drawn over the second display too, but the windows there are not moved out of its way. |
+| Floating windows | Floated on the display they are on. They used to be moved back to the primary, which put a window the user had dragged to their second screen somewhere they had not put it and could not see it. |
+| Overlays | The launcher, the settings and the dock are placed against the primary display's rectangle rather than the virtual origin. The primary is not always at the origin of the virtual screen: a display to the left of it puts the origin somewhere else, and an overlay centred against that lands on the wrong display. |
+| Work area | Reads and writes use the primary display's rectangle, which is the display the work area belongs to. |
+
+One thing did not work the way it looked like it would: the virtual screen metrics
+were being read from the wrong pair of constants, which made the desktop two pixels
+wide and put every bar in the corner. There is a test now that checks the virtual
+screen contains the primary display, because a constant read from the wrong pair fails
+silently.
+
+### M10 - HiDPI and per-monitor scaling
 
 Per-monitor DPI awareness, so a bar and dock on a mixed-DPI setup are crisp rather than
 blurry. The WebView2 surfaces are not DPI-aware everywhere today.
