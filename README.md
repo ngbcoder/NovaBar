@@ -446,7 +446,30 @@ exposing more surface. Commands land in the command palette (M15).
 A file manager. It comes **before** replacing Explorer, because it is useful on its own
 and does not require taking over the shell to be worth having.
 
-### M26 — Full shell replacement
+### M26 - Dynamic Island
+
+**The shell needs somewhere to say things that are not the desktop.** A media track
+playing, a notification arriving, a plugin's command waiting, the window you are
+looking for — these are all short-lived, all want to be visible without taking the
+screen, and all end up as a separate overlay today.
+
+The island is the macOS answer: a small pill at the top that expands when there is
+something to say and folds away when there is not. NovaBar already has half of it —
+the media pill in the bar is exactly the island, collapsed — so this is a matter of
+making it a surface of its own and letting more than media live in it.
+
+Two things make it a milestone rather than a widget. It has to be **the** place
+transient things appear, so the launcher, the notifications from M19 and the
+plugin's commands from M24 all land in the same place instead of each inventing
+one. And it has to be **interruptible**: an island that cannot be pushed aside
+becomes another taskbar, and the shell already has one of those.
+
+The groundwork is done, which is the argument for doing it now rather than later:
+the widget platform exists with permissions (M4), the media read path exists (M5,
+M12), and the shell can be told what the focused window is. What is missing is the
+surface itself, and the rule about what may interrupt what.
+
+### M27 - Full shell replacement
 
 **An option, not a requirement.** Replacing Explorer means desktop icons, context menus
 and the recycle bin on top of the file manager from M25. It is the most ambitious item
