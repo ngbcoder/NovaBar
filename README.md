@@ -288,7 +288,8 @@ away on the board.
 | M23 — Persistence and theming | Planned | `persistence`, `ui` |
 | M24 — Plugin API for widgets | Planned | `widgets`, `plugin` |
 | M25 — Files app | Planned | `explorer`, `files` |
-| M26 — Full shell replacement | Option | `explorer`, `windows-shell` |<!-- ROADMAP:END -->
+| M26 — Full shell replacement | Option | `explorer`, `windows-shell` |
+<!-- ROADMAP:END -->
 
 The notes that follow explain the milestones where the reasoning is not obvious from the
 title.
