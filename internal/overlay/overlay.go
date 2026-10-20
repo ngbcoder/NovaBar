@@ -73,6 +73,9 @@ type Overlay struct {
 	// persistent marks a window that is always present rather than something the user
 	// opened, so a page posting the dismiss sentinel does not close it.
 	persistent bool
+	// opts are the options the overlay was created with, kept so a resize can put
+	// the window back where it belongs.
+	opts Options
 }
 
 // Show creates and displays an overlay centered on the primary monitor.
@@ -107,7 +110,7 @@ func Show(opts Options) (*Overlay, error) {
 	x := int32(float64(screenW-opts.Width) * opts.AnchorX)
 	y := int32(float64(screenH-opts.Height) * opts.AnchorY)
 
-	// A bottom-positioned window spans the monitor and hugs the screen edge.
+	// A bottom-positioned window hugs the screen edge.
 	//
 	// Anchored to the screen, not the work area, deliberately. The dock reserves no space,
 	// so the work area imposes no constraint on it. Following one puts the dock above the
@@ -115,11 +118,17 @@ func Show(opts Options) (*Overlay, error) {
 	// shell re-asserts that reservation on Windows 11 and this shell does not fight it for
 	// a strip neither of them needs. A gap under the dock is worse than an unused
 	// reservation.
+	//
+	// Horizontally it is centred rather than spanning the monitor. A window that spans
+	// the monitor covers the whole strip along the bottom of the screen, and a window
+	// that covers the screen is a window that takes the clicks: the user could not press
+	// a button in an application along the bottom edge. The overlay is sized to the
+	// content instead, so only the content is in the way.
 	if opts.Position == "bottom" {
 		if opts.SpanMonitor {
 			opts.Width = screenW
 		}
-		x = 0
+		x = (screenW - opts.Width) / 2
 		y = screenH - opts.Height - opts.BottomMargin
 	}
 
@@ -128,7 +137,7 @@ func Show(opts Options) (*Overlay, error) {
 		return nil, err
 	}
 
-	o := &Overlay{hwnd: hwnd, persistent: opts.Persistent}
+	o := &Overlay{hwnd: hwnd, persistent: opts.Persistent, opts: opts}
 
 	bg := webview.Color{R: 20, G: 22, B: 26, A: 255}
 	if opts.Transparent {
@@ -197,6 +206,52 @@ func createOverlayWindow(x, y, width, height int32) (windows.HWND, error) {
 		x, y, width, height,
 		0, 0, 0, nil,
 	)
+}
+
+// Resize changes the overlay's size and puts it back where it belongs.
+//
+// A bottom-positioned overlay is re-centred on the way, because the whole point of
+// resizing one is that its content is narrower than the screen.
+//
+// Must run on the message pump thread: it moves the window and resizes the WebView2
+// surface, and both belong to the thread that created them.
+func (o *Overlay) Resize(width, height int32) error {
+	if o == nil || o.closed || o.hwnd == 0 {
+		return fmt.Errorf("overlay is not open")
+	}
+	if width <= 0 || height <= 0 {
+		return fmt.Errorf("overlay size %dx%d is not usable", width, height)
+	}
+
+	screenW := int32(win.GetSystemMetrics(0))
+	screenH := int32(win.GetSystemMetrics(1))
+	if screenW <= 0 || screenH <= 0 {
+		screenW, screenH = 1920, 1080
+	}
+
+	x, y := int32(0), int32(0)
+	switch o.opts.Position {
+	case "bottom":
+		x = (screenW - width) / 2
+		y = screenH - height - o.opts.BottomMargin
+	default:
+		x = int32(float64(screenW-width) * o.opts.AnchorX)
+		y = int32(float64(screenH-height) * o.opts.AnchorY)
+	}
+
+	if err := win.SetWindowPos(o.hwnd, 0, x, y, width, height, win.SWP_NOZORDER|win.SWP_NOACTIVATE); err != nil {
+		return fmt.Errorf("could not resize the overlay window: %w", err)
+	}
+
+	if o.surface != nil {
+		o.surface.Resize(0, 0, width, height)
+	}
+
+	o.opts.Width = width
+	o.opts.Height = height
+
+	log.Printf("[NovaBar Overlay] Resized to %dx%d at %d,%d\n", width, height, x, y)
+	return nil
 }
 
 // HWND returns the overlay's window handle.

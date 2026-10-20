@@ -294,6 +294,24 @@ func PrimaryWorkArea() (int32, error) {
 	return mi.RcWork.Height(), nil
 }
 
+// PrimaryWorkAreaRect returns the work area of the primary display as a rectangle.
+//
+// The rectangle is what the shell currently believes is usable, AppBar reservations
+// included, which makes it the authority on whether a bar still owns its space.
+func PrimaryWorkAreaRect() (RECT, error) {
+	var mi MONITORINFO
+	mi.CbSize = uint32(unsafe.Sizeof(mi))
+
+	hMon, _, _ := procMonitorFromWindow.Call(0, uintptr(MONITOR_DEFAULTTOPRIMARY))
+	if hMon == 0 {
+		return RECT{}, errNoMonitor
+	}
+	if !GetMonitorInfo(hMon, &mi) {
+		return RECT{}, errNoMonitor
+	}
+	return mi.RcWork, nil
+}
+
 // errNoMonitor is returned when the primary monitor cannot be resolved.
 var errNoMonitor = errors.New("could not resolve the primary monitor")
 

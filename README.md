@@ -29,7 +29,7 @@ talking to the daemon over authenticated, permission-checked JSON-RPC:
 | Surface | Kind | Widget |
 | --- | --- | --- |
 | Bar | AppBar, reserves work area | `widgets/bar` |
-| Dock | AppBar, reserves work area | `widgets/dock` |
+| Dock | Overlay, reserves nothing | `widgets/dock` |
 | Launcher | Overlay, reserves nothing | `widgets/launcher` |
 
 Verified together on a two-bar layout: both surfaces attach, connect, receive only the
@@ -297,9 +297,6 @@ away on the board.
 | M25 — Files app | Planned | `explorer`, `files` |
 | M26 — Full shell replacement | Option | `explorer`, `windows-shell` |
 <!-- ROADMAP:END -->
-
-The M5 and M12 rows were changed by hand: the work is done in the tree, and the board
-still has to be told. The next run of the action will set them back until it is.
 
 The notes that follow explain the milestones where the reasoning is not obvious from the
 title.

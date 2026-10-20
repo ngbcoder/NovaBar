@@ -164,6 +164,64 @@ func (m *Manager) UpdatePosition() {
 	m.recomputeRectsLocked(screenWidth(), screenHeight())
 }
 
+// EnsureReserved re-applies the shell reservation for every bar whose space has
+// been taken away.
+//
+// The work area can be rewritten from outside the shell's AppBar bookkeeping, and
+// when it is, the shell forgets that the bars were given any space. The bar keeps
+// drawing itself, but the desktop is laid out as if the bar were not there, so a
+// maximized window ends up underneath it with its title bar hidden behind it.
+//
+// The recovery path is the usual cause. It writes the work area outright, because
+// writing it is the only way to clear a reservation left behind by a process that
+// died, and it clears everybody's while it is at it.
+//
+// The repair is the same call that registers a bar, so it costs nothing.
+func (m *Manager) EnsureReserved() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	work, err := win.PrimaryWorkAreaRect()
+	if err != nil {
+		return
+	}
+	screenW, screenH := screenWidth(), screenHeight()
+
+	edges := make([]uint32, 0, len(m.bars))
+	for edge := range m.bars {
+		edges = append(edges, edge)
+	}
+	sort.Slice(edges, func(i, j int) bool { return edges[i] < edges[j] })
+
+	for _, edge := range edges {
+		ab := m.bars[edge]
+
+		granted := ab.Granted()
+		if granted <= 0 {
+			continue
+		}
+
+		lost := false
+		switch edge {
+		case win.ABE_TOP:
+			lost = work.Top < granted
+		case win.ABE_BOTTOM:
+			lost = work.Bottom > screenH-granted
+		case win.ABE_LEFT:
+			lost = work.Left < granted
+		case win.ABE_RIGHT:
+			lost = work.Right > screenW-granted
+		}
+		if !lost {
+			continue
+		}
+
+		log.Printf("[NovaBar AppBar] The %s bar lost its work-area reservation; claiming it again\n",
+			EdgeName(edge))
+		ab.UpdatePosition()
+	}
+}
+
 // screenWidth and screenHeight read the primary display size.
 func screenWidth() int32  { return win.GetSystemMetrics(0) }
 func screenHeight() int32 { return win.GetSystemMetrics(1) }

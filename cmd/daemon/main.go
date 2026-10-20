@@ -180,6 +180,7 @@ func Run() {
 	go d.configPump()
 	go d.mediaPump()
 	go d.taskbarGuard()
+	go d.barGuard()
 
 	log.Println("[NovaBar] Running message pump. Use 'shellctl --rescue' or the rescue hotkey to exit.")
 
@@ -602,6 +603,21 @@ func (d *daemon) readManifestPermissions(widget string) ([]string, error) {
 
 // handleWidgetMessage handles a message posted from a widget page.
 func (d *daemon) handleWidgetMessage(barName, payload string) {
+	// The dock reports the width of its own panel, so the overlay can be sized to it
+	// instead of to the screen. A full-width overlay covers the whole strip along the
+	// bottom of the display, and a window that covers the screen takes the clicks:
+	// nothing underneath it could be pressed.
+	if barName == dockWidgetName {
+		var msg struct {
+			Type  string `json:"type"`
+			Width int32  `json:"width"`
+		}
+		if err := json.Unmarshal([]byte(payload), &msg); err == nil && msg.Type == "dock-width" {
+			d.resizeDock(msg.Width)
+			return
+		}
+	}
+
 	log.Printf("[NovaBar] Message from widget on the %s bar: %s", barName, payload)
 }
 
@@ -1379,6 +1395,31 @@ func (d *daemon) statsPump() {
 			"monitors":        len(d.engine.GetMonitors()),
 			"goroutines":      runtime.NumGoroutine(),
 		})
+	}
+}
+
+// barGuardInterval is how often the bars check that the shell still has their space.
+//
+// Two seconds is frequent enough that a window is never left sitting under a bar for
+// long enough to be noticed, and rare enough to cost nothing.
+const barGuardInterval = 2 * time.Second
+
+// barGuard makes sure the shell still believes the bars own their space.
+//
+// The work area can be rewritten from outside the shell's AppBar bookkeeping, and the
+// usual way that happens is NovaBar's own recovery path writing it to clear a
+// reservation left behind by a dead process. The bar keeps drawing itself either
+// way, but the desktop behind it is laid out as if the bar were not there, and a
+// maximized window ends up under the bar with its title bar hidden.
+//
+// The check runs on the message pump thread, because claiming a reservation is a
+// message to the shell and the shell answers on the thread that registered.
+func (d *daemon) barGuard() {
+	ticker := time.NewTicker(barGuardInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		d.onPumpThread(func() { d.bars.EnsureReserved() })
 	}
 }
 

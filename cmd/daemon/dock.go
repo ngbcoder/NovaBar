@@ -9,14 +9,29 @@ import (
 	"github.com/ngbcoder/NovaBar/internal/webview"
 )
 
+// dockWidgetName is the widget directory the floating dock is loaded from.
+const dockWidgetName = "dock"
+
 // dockHeight is the window height for the floating dock.
 //
 // Taller than the icons so the magnification has somewhere to grow into and so the hover
-// labels have room. The window spans the monitor and is transparent; only the rounded
-// panel inside it is painted, which is what makes the dock look like it floats.
-const dockWidgetName = "dock"
-
+// labels have room. The window is transparent; only the rounded panel inside it is
+// painted, which is what makes the dock look like it floats.
 const dockHeight = 180
+
+// dockProvisionalWidth is the width the dock starts at.
+//
+// The dock reports the width of its own panel once it has rendered, and the overlay is
+// sized to match. Until then something has to be assumed, and this is generous enough
+// that the icons are never clipped while the real width is worked out.
+const dockProvisionalWidth = 720
+
+// dockWidthMargin is the space left around the dock's panel inside the overlay.
+//
+// The magnification grows the icons outwards when the pointer comes near, and the
+// hover labels sit above them. Both need room the panel itself does not have, and
+// without it they would be cut off at the edge of the window.
+const dockWidthMargin = 40
 
 // showDock creates the floating dock, or does nothing if it is disabled or already open.
 //
@@ -62,9 +77,8 @@ func (d *daemon) showDock() {
 	ov, err := overlay.Show(overlay.Options{
 		Widget:       dockWidgetName,
 		Position:     "bottom",
-		SpanMonitor:  true,
 		BottomMargin: int32(d.cfg.Dock.BottomMargin),
-		Width:        0, // filled from the monitor by SpanMonitor
+		Width:        dockProvisionalWidth,
 		Height:       dockHeight,
 		Transparent:  true,
 		Persistent:   true,
@@ -86,6 +100,28 @@ func (d *daemon) showDock() {
 
 	log.Printf("[NovaBar] Dock floating at the bottom, %dpx icons, margin %d\n",
 		d.cfg.Dock.Size, d.cfg.Dock.BottomMargin)
+}
+
+// resizeDock sizes the dock's overlay to the panel the widget reported.
+//
+// The overlay is sized to the dock rather than to the screen, so that the rest of the
+// bottom strip stays clickable. A window that covers the screen is a window that
+// takes the clicks: the user could not press a button in an application along the
+// bottom edge, because the dock's own invisible surface was in the way.
+//
+// The width the widget reports is the panel's natural width, not the magnified one,
+// so the overlay does not grow and shrink as the pointer moves.
+func (d *daemon) resizeDock(width int32) {
+	if d.dock == nil || width <= 0 {
+		return
+	}
+
+	target := width + 2*dockWidthMargin
+	d.onPumpThread(func() {
+		if err := d.dock.Resize(target, dockHeight); err != nil {
+			log.Printf("[NovaBar] Could not resize the dock: %v\n", err)
+		}
+	})
 }
 
 // hideDock closes the floating dock and drops its credential.

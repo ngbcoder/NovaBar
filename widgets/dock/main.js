@@ -2,8 +2,9 @@
 //
 // A macOS-style dock: a translucent rounded pill floating over the wallpaper, with
 // magnification on hover, running dots, and a separator between pinned applications and
-// running windows. The window itself spans the monitor and reserves no work area, so
-// windows underneath stay fully usable.
+// running windows. The window reserves no work area, so windows underneath stay fully
+// usable, and it is sized to the dock rather than to the screen, so the rest of the
+// bottom strip stays clickable.
 
 import { NovaBarSDK } from '/sdk/novabar.js';
 
@@ -21,6 +22,36 @@ const sdk = new NovaBarSDK({
 const HIDE_DELAY_MS = 700;
 let hideTimer = 0;
 let dockVisible = true;
+
+/**
+ * Report the width of the panel so the shell can size the window to it.
+ *
+ * The window has to be as wide as the dock and no wider. A window as wide as the
+ * screen covers the whole strip along the bottom of the display, and a window that
+ * covers the screen takes the clicks: nothing underneath it could be pressed, which
+ * is the difference between a dock and a sheet of glass laid over the desktop.
+ *
+ * The natural width is what is reported, never the magnified one. The magnification
+ * grows the icons outwards, and a window that grew and shrank with the pointer would
+ * be a window that flickered.
+ */
+let lastReportedWidth = 0;
+
+function reportWidth() {
+    if (dock.classList.contains('magnifying')) return;
+
+    const width = Math.ceil(Math.max(dock.scrollWidth, dock.offsetWidth));
+    if (width <= 0 || width === lastReportedWidth) return;
+
+    lastReportedWidth = width;
+    window.chrome.webview.postMessage(JSON.stringify({ type: 'dock-width', width }));
+}
+
+/** Watch the panel for size changes, so the window follows the number of icons. */
+function watchWidth() {
+    if (typeof ResizeObserver !== 'function') return;
+    new ResizeObserver(reportWidth).observe(dock);
+}
 
 function showDock() {
     if (hideTimer) {
@@ -539,6 +570,10 @@ async function main() {
     } catch (err) {
         console.warn('could not read the dock size from the schema', err);
     }
+
+    // The window is sized to the dock, so the shell has to be told how wide it is.
+    watchWidth();
+    reportWidth();
 }
 
 main();
