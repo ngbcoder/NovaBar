@@ -40,6 +40,10 @@ session's title, artist and transport state is not implemented, so the media are
 hidden. App pinning for the dock is now done; see
 [docs/gsmtc-m5-findings.md](docs/gsmtc-m5-findings.md) for what remains on media.
 
+<p align="center">
+  <img src="TargetLook.png" alt="TargetLook" width="420">
+</p>
+
 ## Safety
 
 NovaBar's central promise is that it cannot strand you without a desktop. Four
