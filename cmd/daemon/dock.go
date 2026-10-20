@@ -16,7 +16,7 @@ import (
 // panel inside it is painted, which is what makes the dock look like it floats.
 const dockWidgetName = "dock"
 
-const dockHeight = 108
+const dockHeight = 180
 
 // showDock creates the floating dock, or does nothing if it is disabled or already open.
 //

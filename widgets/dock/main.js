@@ -9,12 +9,57 @@ import { NovaBarSDK } from '/sdk/novabar.js';
 
 const boot = window.NOVABAR;
 const dock = document.getElementById('dock');
+const hotzone = document.getElementById('hotzone');
 
 const sdk = new NovaBarSDK({
     port: boot.port,
     token: boot.token,
     widgetToken: boot.widget_token,
 });
+
+/** Auto-hide: dock slides away after the pointer leaves; hotzone at the bottom reveals it. */
+const HIDE_DELAY_MS = 700;
+let hideTimer = 0;
+let dockVisible = true;
+
+function showDock() {
+    if (hideTimer) {
+        clearTimeout(hideTimer);
+        hideTimer = 0;
+    }
+    dockVisible = true;
+    dock.classList.remove('hidden');
+}
+
+function scheduleHide() {
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+        hideTimer = 0;
+        dockVisible = false;
+        dock.classList.add('hidden');
+        dismissMenu();
+    }, HIDE_DELAY_MS);
+}
+
+function wireAutoHide() {
+    // Reveal when the pointer enters the bottom strip or the dock itself.
+    const reveal = () => showDock();
+    const maybeHide = () => scheduleHide();
+
+    hotzone.addEventListener('pointerenter', reveal);
+    dock.addEventListener('pointerenter', reveal);
+    dock.addEventListener('pointerleave', maybeHide);
+
+    // If the pointer leaves the whole overlay (window) while dock is up, hide.
+    document.documentElement.addEventListener('pointerleave', maybeHide);
+
+    // Start visible briefly so the user sees it on launch, then auto-hide.
+    setTimeout(() => {
+        if (!dock.matches(':hover') && !hotzone.matches(':hover')) {
+            scheduleHide();
+        }
+    }, 1800);
+}
 
 /** Pinned applications, in dock order. */
 let pinned = [];
@@ -59,7 +104,62 @@ function hueFor(name) {
     return 140 + ((h * 137) % 100);
 }
 
-function makeTile({ label, glyph, icon, hue, running: isRunning, active, onClick, onContextMenu, onWheel, volume }) {
+/** Hide any open custom context menu. */
+function dismissMenu() {
+    document.querySelectorAll('.ctx-menu').forEach((el) => el.remove());
+}
+
+/**
+ * Show a small glass context menu next to a tile.
+ * items: [{ label, action, danger? }]
+ */
+function showContextMenu(e, items) {
+    dismissMenu();
+    if (!items || items.length === 0) return;
+
+    const menu = document.createElement('div');
+    menu.className = 'ctx-menu';
+    for (const item of items) {
+        const row = document.createElement('button');
+        row.className = 'ctx-item' + (item.danger ? ' danger' : '');
+        row.textContent = item.label;
+        row.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            dismissMenu();
+            item.action();
+        });
+        menu.appendChild(row);
+    }
+
+    document.body.appendChild(menu);
+
+    // Position above the pointer so it stays inside the dock overlay when possible.
+    const pad = 8;
+    const mw = menu.offsetWidth;
+    const mh = menu.offsetHeight;
+    let x = e.clientX - mw / 2;
+    let y = e.clientY - mh - 12;
+    x = Math.max(pad, Math.min(x, window.innerWidth - mw - pad));
+    y = Math.max(pad, y);
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+
+    // Dismiss on next outside click / escape / leave dock.
+    const close = (ev) => {
+        if (ev.type === 'keydown' && ev.key !== 'Escape') return;
+        if (ev.type === 'pointerdown' && menu.contains(ev.target)) return;
+        dismissMenu();
+        document.removeEventListener('pointerdown', close, true);
+        document.removeEventListener('keydown', close, true);
+    };
+    // Defer so the current contextmenu event does not immediately close it.
+    requestAnimationFrame(() => {
+        document.addEventListener('pointerdown', close, true);
+        document.addEventListener('keydown', close, true);
+    });
+}
+
+function makeTile({ label, glyph, icon, hue, running: isRunning, active, onClick, menuItems, onWheel, volume }) {
     const btn = document.createElement('button');
     btn.className = 'tile' + (active ? ' active' : '') + (icon ? ' has-icon' : '');
     btn.style.setProperty('--h', String(hue ?? 168));
@@ -100,14 +200,13 @@ function makeTile({ label, glyph, icon, hue, running: isRunning, active, onClick
 
     btn.addEventListener('click', onClick);
 
-    if (onContextMenu) {
-        btn.addEventListener('contextmenu', (e) => {
-            // Without this the browser menu appears over the dock and the shell looks
-            // broken.
-            e.preventDefault();
-            onContextMenu();
-        });
-    }
+    // Always kill the WebView/browser context menu so the shell does not look broken.
+    btn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (menuItems && menuItems.length) showContextMenu(e, menuItems);
+    });
+
     if (onWheel) {
         btn.addEventListener('wheel', (e) => {
             e.preventDefault();
@@ -171,7 +270,9 @@ function buildTiles() {
             running: running.some((w) => w.proc_name === app.proc_name),
             active: running.some((w) => w.proc_name === app.proc_name && w.hwnd === activeHwnd),
             onClick: () => launch(app.target),
-            onContextMenu: () => unpin(app),
+            menuItems: [
+                { label: 'Unpin from dock', action: () => unpin(app), danger: true },
+            ],
             // Without a pid there is nothing to address, so the wheel is left unbound
             // rather than silently adjusting some other application.
             onWheel: vol ? (d) => adjustVolume(vol.pid, d) : undefined,
@@ -191,6 +292,10 @@ function buildTiles() {
             running: true,
             active: win.hwnd === activeHwnd,
             onClick: () => focus(win.hwnd),
+            // Running tiles: suppress browser menu; pin needs an exe path we do not have yet.
+            menuItems: [
+                { label: 'Focus', action: () => focus(win.hwnd) },
+            ],
             onWheel: vol ? (d) => adjustVolume(vol.pid, d) : undefined,
             volume: vol,
         }));
@@ -407,8 +512,12 @@ async function main() {
     }
 
     // The dock is opened by the daemon, never by the user, so there is nothing to
-    // dismiss and Escape must not close it.
+    // dismiss and Escape must not close it. Also kill the WebView browser menu
+    // everywhere on this surface so right-click never looks broken.
     document.addEventListener('keydown', (e) => e.preventDefault());
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    wireAutoHide();
 
     sdk.subscribe('windows.updated', setRunning);
     sdk.subscribe('audio.updated', setAudio);

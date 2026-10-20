@@ -20,7 +20,7 @@ transparent = false
 
 [hotkeys]
 rescue = 'Ctrl+Alt+Shift+R'
-launcher = 'Win+Space'
+launcher = 'Shift+Space'
 workspace_prev = 'Alt+Left'
 workspace_next = 'Alt+Right'
 settings = 'Ctrl+Alt+S'

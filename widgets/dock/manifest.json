@@ -1,9 +1,8 @@
-
 {
   "id": "novabar.dock",
   "name": "NovaBar Dock",
   "version": "0.7.0",
-  "entry": "index-dock.html",
+  "entry": "index.html",
   "permissions": [
     "config.read",
     "windows.read",
