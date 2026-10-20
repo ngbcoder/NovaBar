@@ -71,7 +71,15 @@ func ExtractIconBase64(exePath string) (string, error) {
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
-// ExtractIconPNG extracts an HICON and encodes it into PNG bytes.
+// ExtractIconPNG extracts the icon for an executable path and encodes it into PNG
+// bytes.
+//
+// A shortcut is resolved to its target first. A shortcut's own icon is the target's
+// icon with an arrow drawn over it, and that is the icon of the shortcut rather than
+// the icon of the application.
+//
+// The executable's own icon is preferred over the shell's, because the shell's is
+// 32 pixels and the executable carries a 256 pixel PNG of the real thing.
 func ExtractIconPNG(exePath string) ([]byte, error) {
 	// Clean up path: strip surrounding quotes and expand environment variables
 	exePath = strings.Trim(exePath, `"'`)
@@ -82,6 +90,27 @@ func ExtractIconPNG(exePath string) ([]byte, error) {
 		exePath = resolved
 	}
 
+	// A shortcut points at the application; the application is what has the icon.
+	target := exePath
+	if IsShortcut(exePath) {
+		if resolved, err := ResolveShortcut(exePath); err == nil && resolved != "" {
+			target = resolved
+		}
+	}
+
+	// The real icon, at a size worth having.
+	if png, err := ExtractLargestIconPNG(target); err == nil {
+		return png, nil
+	}
+
+	// The shell's icon, which is smaller. It still comes from the target rather than
+	// the shortcut: the shell's icon for a shortcut is the target's icon with an
+	// arrow drawn over it.
+	return extractShellIconPNG(target)
+}
+
+// extractShellIconPNG asks the shell for an icon and encodes it into PNG bytes.
+func extractShellIconPNG(exePath string) ([]byte, error) {
 	ptr, err := windows.UTF16PtrFromString(exePath)
 	if err != nil {
 		return nil, err
