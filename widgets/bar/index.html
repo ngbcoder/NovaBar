@@ -180,16 +180,33 @@
       flex: none;
       width: 24px;
       height: 24px;
+      /* The default button padding is 6px inline, which pushes the icon off
+         centre no matter how the content is aligned. */
+      padding: 0;
       border: none;
       border-radius: 50%;
       background: transparent;
       color: var(--text);
-      font-family: 'Segoe UI Symbol', 'Segoe UI', sans-serif;
-      font-size: 11px;
-      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       cursor: pointer;
       transition: background 140ms var(--ease), transform 100ms var(--ease);
     }
+    /* The transport icons are drawn rather than typed.
+       A font cannot centre a symbol: the play and pause glyphs sit low in their
+       line box, which left the pause bars about two pixels below the middle of
+       the button, and the play triangle a pixel low and to the left. Drawn
+       icons have their own geometry, so they sit where they are put. */
+    .media-icon {
+      width: 11px;
+      height: 11px;
+      fill: currentColor;
+      display: block;
+    }
+    .media-icon-pause { display: none; }
+    .media-btn.is-playing .media-icon-play { display: none; }
+    .media-btn.is-playing .media-icon-pause { display: block; }
     .media-btn:hover { background: var(--chip-hover); }
     .media-btn:active { transform: scale(0.9); }
     .media-btn:disabled { opacity: 0.28; cursor: default; background: transparent; transform: none; }
@@ -263,9 +280,25 @@
           <div class="media-title" id="media-title"></div>
           <div class="media-artist" id="media-artist"></div>
         </div>
-        <button class="media-btn" id="media-next" title="Next track" aria-label="Next track">&#9197;&#xFE0E;</button>
-        <button class="media-btn" id="media-toggle" title="Play or pause" aria-label="Play or pause">&#9208;&#xFE0E;</button>
-        <button class="media-btn" id="media-prev" title="Previous track" aria-label="Previous track">&#9198;&#xFE0E;</button>
+        <button class="media-btn" id="media-next" title="Next track" aria-label="Next track">
+          <svg class="media-icon" viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M3 2 L8.2 6 L3 10 Z" /><rect x="9" y="2" width="1.6" height="8" rx="0.5" />
+          </svg>
+        </button>
+        <button class="media-btn" id="media-toggle" title="Play or pause" aria-label="Play or pause">
+          <svg class="media-icon media-icon-play" viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M2.8 1.7 L10.6 6 L2.8 10.3 Z" />
+          </svg>
+          <svg class="media-icon media-icon-pause" viewBox="0 0 12 12" aria-hidden="true">
+            <rect x="3.3" y="1.9" width="2" height="8.2" rx="0.5" />
+            <rect x="6.7" y="1.9" width="2" height="8.2" rx="0.5" />
+          </svg>
+        </button>
+        <button class="media-btn" id="media-prev" title="Previous track" aria-label="Previous track">
+          <svg class="media-icon" viewBox="0 0 12 12" aria-hidden="true">
+            <rect x="1.4" y="2" width="1.6" height="8" rx="0.5" /><path d="M9 2 L3.8 6 L9 10 Z" />
+          </svg>
+        </button>
       </div>
 
       <div class="clock" id="clock">--:--:--</div>
