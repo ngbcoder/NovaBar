@@ -101,14 +101,20 @@ func Show(opts Options) (*Overlay, error) {
 
 	// Work out the work area so the overlay centers over usable space rather than
 	// possibly landing under a bar or the taskbar.
-	screenW := int32(win.GetSystemMetrics(0))
-	screenH := int32(win.GetSystemMetrics(1))
-	if screenW <= 0 || screenH <= 0 {
-		screenW, screenH = 1920, 1080
+	//
+	// The primary display rather than the virtual screen. An overlay is placed on
+	// one display, and the primary is not always at the origin of the virtual
+	// screen: a display to the left of it puts the virtual origin somewhere else
+	// entirely, and centring against that lands the overlay on the wrong screen.
+	screen, err := win.PrimaryMonitor()
+	if err != nil || screen.Width() <= 0 || screen.Height() <= 0 {
+		screen = win.RECT{Left: 0, Top: 0, Right: 1920, Bottom: 1080}
 	}
+	screenW := screen.Width()
+	screenH := screen.Height()
 
-	x := int32(float64(screenW-opts.Width) * opts.AnchorX)
-	y := int32(float64(screenH-opts.Height) * opts.AnchorY)
+	x := screen.Left + int32(float64(screenW-opts.Width)*opts.AnchorX)
+	y := screen.Top + int32(float64(screenH-opts.Height)*opts.AnchorY)
 
 	// A bottom-positioned window hugs the screen edge.
 	//
@@ -128,8 +134,8 @@ func Show(opts Options) (*Overlay, error) {
 		if opts.SpanMonitor {
 			opts.Width = screenW
 		}
-		x = (screenW - opts.Width) / 2
-		y = screenH - opts.Height - opts.BottomMargin
+		x = screen.Left + (screenW-opts.Width)/2
+		y = screen.Bottom - opts.Height - opts.BottomMargin
 	}
 
 	hwnd, err := createOverlayWindow(x, y, opts.Width, opts.Height)
@@ -223,20 +229,21 @@ func (o *Overlay) Resize(width, height int32) error {
 		return fmt.Errorf("overlay size %dx%d is not usable", width, height)
 	}
 
-	screenW := int32(win.GetSystemMetrics(0))
-	screenH := int32(win.GetSystemMetrics(1))
-	if screenW <= 0 || screenH <= 0 {
-		screenW, screenH = 1920, 1080
+	screen, err := win.PrimaryMonitor()
+	if err != nil || screen.Width() <= 0 || screen.Height() <= 0 {
+		screen = win.RECT{Left: 0, Top: 0, Right: 1920, Bottom: 1080}
 	}
+	screenW := screen.Width()
+	screenH := screen.Height()
 
 	x, y := int32(0), int32(0)
 	switch o.opts.Position {
 	case "bottom":
-		x = (screenW - width) / 2
-		y = screenH - height - o.opts.BottomMargin
+		x = screen.Left + (screenW-width)/2
+		y = screen.Bottom - height - o.opts.BottomMargin
 	default:
-		x = int32(float64(screenW-width) * o.opts.AnchorX)
-		y = int32(float64(screenH-height) * o.opts.AnchorY)
+		x = screen.Left + int32(float64(screenW-width)*o.opts.AnchorX)
+		y = screen.Top + int32(float64(screenH-height)*o.opts.AnchorY)
 	}
 
 	if err := win.SetWindowPos(o.hwnd, 0, x, y, width, height, win.SWP_NOZORDER|win.SWP_NOACTIVATE); err != nil {

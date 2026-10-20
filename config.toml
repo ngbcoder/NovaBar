@@ -1,4 +1,6 @@
 [general]
+# How far the bars reach: 'primary' keeps them on the primary display, 'desktop' spans every display.
+bar_scope = 'primary'
 first_run = false
 log_level = 'info'
 rescue_hotkey = 'Ctrl+Alt+Shift+R'

@@ -69,6 +69,8 @@ type Info struct {
 type Manager struct {
 	mu   sync.Mutex
 	bars map[uint32]*AppBarManager // keyed by edge
+	// scope is how far the bars reach: the whole desktop or the primary display.
+	scope string
 }
 
 // NewManager creates an empty bar manager.
@@ -161,7 +163,7 @@ func (m *Manager) UpdatePosition() {
 	for _, edge := range edges {
 		m.bars[edge].UpdatePosition()
 	}
-	m.recomputeRectsLocked(screenWidth(), screenHeight())
+	m.recomputeRectsLocked(Rect{Left: 0, Top: 0, Right: screenWidth(), Bottom: screenHeight()})
 }
 
 // EnsureReserved re-applies the shell reservation for every bar whose space has
@@ -237,9 +239,14 @@ func (m *Manager) EnsureReserved() {
 	}
 }
 
-// screenWidth and screenHeight read the primary display size.
-func screenWidth() int32  { return win.GetSystemMetrics(0) }
-func screenHeight() int32 { return win.GetSystemMetrics(1) }
+// screenWidth and screenHeight read the size of the whole desktop.
+//
+// The virtual screen rather than the primary display. A bar owns an edge of the
+// desktop, so on a second display the two answers differ by the width of that
+// display, and a bar sized for the primary alone leaves the rest of the desktop
+// uncovered.
+func screenWidth() int32  { return win.VirtualScreen().Width() }
+func screenHeight() int32 { return win.VirtualScreen().Height() }
 
 // UnregisterAll tears down every bar. Safe on a nil or empty manager.
 func (m *Manager) UnregisterAll() {
@@ -348,19 +355,77 @@ func (m *Manager) WorkArea(screen Rect) Rect {
 // Each bar is placed against the screen with every *other* bar's thickness already
 // removed, so the corner belongs to whichever bar registered first and the others start
 // past it. Idempotent, and safe to call on every change.
-func (m *Manager) RecomputeRects(screenW, screenH int32) {
+//
+// The screen is the whole desktop, every display included. A bar owns an edge of the
+// desktop rather than of one monitor, and the shell credits the space against the
+// whole desktop, so a bar sized for the primary display alone reserves too little
+// when there is a second one, and the windows on that display end up under it.
+func (m *Manager) RecomputeRects() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.recomputeRectsLocked(screenW, screenH)
+	m.recomputeRectsLocked(m.desktop())
+}
+
+// The bar scopes.
+const (
+	// ScopeDesktop gives every bar the whole desktop, every display included.
+	ScopeDesktop = "desktop"
+	// ScopePrimary keeps every bar on the primary display.
+	ScopePrimary = "primary"
+)
+
+// SetScope decides how far the bars reach.
+//
+// The AppBar API reserves a rectangle rather than an edge, so both are possible: the
+// shell reserves what the bar asks for and nothing beyond it. A desktop-wide bar
+// spans both displays with one widget; a primary-only bar leaves the other display
+// alone.
+func (m *Manager) SetScope(scope string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if scope != ScopePrimary {
+		scope = ScopeDesktop
+	}
+	m.scope = scope
+
+	for _, ab := range m.bars {
+		ab.SetScope(scope)
+	}
+	m.recomputeRectsLocked(m.desktop())
+}
+
+// desktop returns the rectangle the bars are placed against.
+func (m *Manager) desktop() Rect {
+	if m.scope == ScopePrimary {
+		primary, err := win.PrimaryMonitor()
+		if err == nil && primary.Width() > 0 && primary.Height() > 0 {
+			return Rect{
+				Left:   primary.Left,
+				Top:    primary.Top,
+				Right:  primary.Right,
+				Bottom: primary.Bottom,
+			}
+		}
+	}
+
+	virtual := win.VirtualScreen()
+	if virtual.Width() <= 0 || virtual.Height() <= 0 {
+		return Rect{Left: 0, Top: 0, Right: 1920, Bottom: 1080}
+	}
+	return Rect{
+		Left:   virtual.Left,
+		Top:    virtual.Top,
+		Right:  virtual.Right,
+		Bottom: virtual.Bottom,
+	}
 }
 
 // recomputeRectsLocked is RecomputeRects with the lock already held.
-func (m *Manager) recomputeRectsLocked(screenW, screenH int32) {
-	if screenW <= 0 || screenH <= 0 {
-		screenW, screenH = 1920, 1080
+func (m *Manager) recomputeRectsLocked(screen Rect) {
+	if screen.Width() <= 0 || screen.Height() <= 0 {
+		screen = Rect{Left: 0, Top: 0, Right: 1920, Bottom: 1080}
 	}
-
-	screen := Rect{Left: 0, Top: 0, Right: screenW, Bottom: screenH}
 
 	// Thickness of each edge, taken from whichever bar owns it.
 	thickness := map[uint32]int32{}

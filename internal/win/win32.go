@@ -556,6 +556,43 @@ func DestroyWindow(hwnd windows.HWND) bool {
 	return r1 != 0
 }
 
+// Virtual screen metrics, which report the whole desktop rather than one display.
+const (
+	// SM_XVIRTUALSCREEN is the left edge of the virtual screen.
+	SM_XVIRTUALSCREEN = 76
+	// SM_YVIRTUALSCREEN is the top edge of the virtual screen.
+	SM_YVIRTUALSCREEN = 77
+	// SM_CXVIRTUALSCREEN is the width of the virtual screen.
+	SM_CXVIRTUALSCREEN = 78
+	// SM_CYVIRTUALSCREEN is the height of the virtual screen.
+	SM_CYVIRTUALSCREEN = 79
+)
+
+// VirtualScreen returns the bounds of the whole desktop, every display included.
+//
+// The screen metrics for the primary display alone are the wrong answer for anything
+// that spans displays. An app bar owns an edge of the desktop, not of one monitor, and
+// on a second display the two answers differ by the whole width of the second screen.
+//
+// The origin is not always zero: a display to the left of the primary puts the
+// virtual screen's left edge at a negative coordinate, and every rectangle handed
+// out here is in virtual screen coordinates.
+func VirtualScreen() RECT {
+	left := GetSystemMetrics(SM_XVIRTUALSCREEN)
+	top := GetSystemMetrics(SM_YVIRTUALSCREEN)
+	width := GetSystemMetrics(SM_CXVIRTUALSCREEN)
+	height := GetSystemMetrics(SM_CYVIRTUALSCREEN)
+
+	if width <= 0 || height <= 0 {
+		// The virtual metrics are not available, which is not supposed to happen.
+		// The primary display is the best answer left.
+		return RECT{Left: 0, Top: 0, Right: GetSystemMetrics(0), Bottom: GetSystemMetrics(1)}
+	}
+
+	return RECT{Left: left, Top: top, Right: left + width, Bottom: top + height}
+}
+
+// GetSystemMetrics reads a system metric.
 func GetSystemMetrics(nIndex int32) int32 {
 	r1, _, _ := procGetSystemMetrics.Call(uintptr(nIndex))
 	return int32(r1)

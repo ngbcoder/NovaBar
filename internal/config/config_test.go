@@ -111,6 +111,44 @@ func TestValidateRejectsBadLayout(t *testing.T) {
 	}
 }
 
+// TestValidateRejectsBadBarScope checks the bar scope.
+//
+// The scope decides how far the bars reach, and a value that is neither of the two
+// would silently mean "primary" and leave the user wondering why the setting does
+// nothing.
+func TestValidateRejectsBadBarScope(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.General.BarScope = "everywhere"
+	if err := Validate(&cfg); err == nil {
+		t.Error("expected an error for an unknown bar scope")
+	}
+}
+
+// TestValidateNormalizesBarScopeCase checks that the scope is accepted in any case
+// and stored in the canonical one.
+func TestValidateNormalizesBarScopeCase(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.General.BarScope = "Primary"
+	if err := Validate(&cfg); err != nil {
+		t.Fatalf("bar scope casing should normalize, got: %v", err)
+	}
+	if cfg.General.BarScope != BarScopePrimary {
+		t.Errorf("bar scope = %q, want %q", cfg.General.BarScope, BarScopePrimary)
+	}
+}
+
+// TestDefaultBarScopeIsPrimary pins the default.
+//
+// A bar that reaches the whole desktop is drawn across every display, but the shell
+// reserves the work-area strip only for the display the bar's rectangle starts on. The
+// second display's windows can then slide under the bar that is drawn over them, so
+// the primary display is the safe default.
+func TestDefaultBarScopeIsPrimary(t *testing.T) {
+	if got := DefaultConfig().General.BarScope; got != BarScopePrimary {
+		t.Errorf("the default bar scope is %q, want %q", got, BarScopePrimary)
+	}
+}
+
 func TestValidateNormalizesLayoutCase(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Tiling.DefaultLayout = "BSP"

@@ -50,6 +50,14 @@ type DockConfig struct {
 	BottomMargin int `toml:"bottom_margin"`
 }
 
+// The bar scopes.
+const (
+	// BarScopeDesktop gives every bar the whole desktop.
+	BarScopeDesktop = "desktop"
+	// BarScopePrimary keeps every bar on the primary display.
+	BarScopePrimary = "primary"
+)
+
 type GeneralConfig struct {
 	FirstRun bool   `toml:"first_run"`
 	LogLevel string `toml:"log_level"`
@@ -61,6 +69,15 @@ type GeneralConfig struct {
 	// property of any individual bar. Two bars each asking to hide it would be
 	// meaningless.
 	HideTaskbar bool `toml:"hide_taskbar"`
+	// BarScope is how far the bars reach: "desktop" or "primary".
+	//
+	// "desktop" gives every bar the whole desktop, so one top bar spans both
+	// displays. "primary" keeps each bar on the primary display, and the other
+	// displays are left alone.
+	//
+	// The AppBar API reserves a rectangle rather than an edge, so both are possible:
+	// the shell reserves the rectangle the bar asks for and nothing beyond it.
+	BarScope string `toml:"bar_scope"`
 }
 
 type TilingConfig struct {
@@ -130,6 +147,14 @@ func DefaultConfig() Config {
 			// the rescue path is not working. TestDefaultHideTaskbarIsSafe asserts those,
 			// rather than asserting the flag itself.
 			HideTaskbar: true,
+			// The bars stay on the primary display by default.
+			//
+			// A bar that reaches the whole desktop is drawn across every display,
+			// but the shell reserves the work-area strip only for the display the
+			// bar's rectangle starts on. So the second display's windows can still
+			// slide under the bar that is drawn over them, which is the one thing a
+			// bar must not do.
+			BarScope: BarScopePrimary,
 		},
 		Tiling: TilingConfig{
 			Enabled:       true,
@@ -277,6 +302,15 @@ func Validate(cfg *Config) error {
 	}
 	if cfg.Tiling.OuterGap > 200 {
 		cfg.Tiling.OuterGap = 200
+	}
+
+	scope := strings.ToLower(strings.TrimSpace(cfg.General.BarScope))
+	if scope == "" {
+		cfg.General.BarScope = BarScopePrimary
+	} else if scope != BarScopeDesktop && scope != BarScopePrimary {
+		return fmt.Errorf("general.bar_scope %q is not one of desktop, primary", cfg.General.BarScope)
+	} else {
+		cfg.General.BarScope = scope
 	}
 
 	if err := validateBars(cfg.Bars); err != nil {

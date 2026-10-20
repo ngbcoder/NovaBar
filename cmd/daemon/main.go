@@ -410,10 +410,14 @@ func (d *daemon) applyBars(cfg config.Config) {
 
 	d.warnAboutCollapsedBars()
 
+	// How far the bars reach is a setting, and it changes the rectangles, so it is
+	// applied before they are recomputed.
+	d.bars.SetScope(cfg.General.BarScope)
+
 	// Recompute every bar's rectangle before attaching surfaces, so adjacent edges do
 	// not both claim the corner and a left dock starts below the top bar rather than
 	// underneath it.
-	d.bars.RecomputeRects(win.GetSystemMetrics(0), win.GetSystemMetrics(1))
+	d.bars.RecomputeRects()
 
 	d.syncSurfaces(cfg)
 

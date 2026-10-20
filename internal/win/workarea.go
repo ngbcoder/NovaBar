@@ -60,14 +60,15 @@ func SetWorkArea(rect RECT, persist bool) error {
 //
 // Returns an error rather than logging: callers in the recovery path need to know.
 func SetFullWorkArea(persist bool) error {
-	screenW := GetSystemMetrics(0) // SM_CXSCREEN
-	screenH := GetSystemMetrics(1) // SM_CYSCREEN
-	if screenW <= 0 || screenH <= 0 {
+	primary, err := PrimaryMonitor()
+	if err != nil {
+		return err
+	}
+	if primary.Width() <= 0 || primary.Height() <= 0 {
 		return errors.New("screen metrics unavailable; cannot reset the work area")
 	}
 
-	full := RECT{Left: 0, Top: 0, Right: screenW, Bottom: screenH}
-	return SetWorkArea(full, persist)
+	return SetWorkArea(primary, persist)
 }
 
 // RestoreFullWorkArea forces the desktop work area back to the entire primary display.
@@ -103,9 +104,15 @@ const defaultTaskbarHeight = 48
 // taskbar below the bottom edge of the screen: a window that exists, that the
 // shell believes is visible, and that nobody can see.
 func NormalWorkArea() (RECT, error) {
-	screenW := GetSystemMetrics(0) // SM_CXSCREEN
-	screenH := GetSystemMetrics(1) // SM_CYSCREEN
-	if screenW <= 0 || screenH <= 0 {
+	// The primary display, not the virtual screen. The work area belongs to one
+	// display, and the primary is not always at the origin of the virtual screen:
+	// a display to the left of it puts the origin somewhere else entirely, and a
+	// work area written against that lands on the wrong display.
+	primary, err := PrimaryMonitor()
+	if err != nil {
+		return RECT{}, err
+	}
+	if primary.Width() <= 0 || primary.Height() <= 0 {
 		return RECT{}, errors.New("screen metrics unavailable; cannot compute the work area")
 	}
 
@@ -121,7 +128,12 @@ func NormalWorkArea() (RECT, error) {
 		}
 	}
 
-	return RECT{Left: 0, Top: 0, Right: screenW, Bottom: screenH - height}, nil
+	return RECT{
+		Left:   primary.Left,
+		Top:    primary.Top,
+		Right:  primary.Right,
+		Bottom: primary.Bottom - height,
+	}, nil
 }
 
 // RestoreNormalWorkArea puts the work area back the way Windows ships it: the screen
@@ -292,6 +304,25 @@ func PrimaryWorkArea() (int32, error) {
 		return 0, errNoMonitor
 	}
 	return mi.RcWork.Height(), nil
+}
+
+// PrimaryMonitor returns the bounds of the primary display.
+//
+// The primary display is not always at the origin of the virtual screen. A display
+// to the left of it puts the virtual screen's left edge at a negative coordinate, so
+// anything positioned against the virtual origin lands on the wrong display.
+func PrimaryMonitor() (RECT, error) {
+	var mi MONITORINFO
+	mi.CbSize = uint32(unsafe.Sizeof(mi))
+
+	hMon, _, _ := procMonitorFromWindow.Call(0, uintptr(MONITOR_DEFAULTTOPRIMARY))
+	if hMon == 0 {
+		return RECT{}, errNoMonitor
+	}
+	if !GetMonitorInfo(hMon, &mi) {
+		return RECT{}, errNoMonitor
+	}
+	return mi.RcMonitor, nil
 }
 
 // PrimaryWorkAreaRect returns the work area of the primary display as a rectangle.

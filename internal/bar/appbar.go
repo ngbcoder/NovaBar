@@ -106,6 +106,9 @@ type AppBarManager struct {
 	// lastClaim is when the bar last tried to claim its space, so a shell that has
 	// forgotten it cannot be retried in a tight loop.
 	lastClaim time.Time
+
+	// scope is how far the bar reaches: the whole desktop or the primary display.
+	scope string
 }
 
 // NewAppBarManager creates an instance of AppBarManager.
@@ -242,10 +245,15 @@ func (ab *AppBarManager) updatePositionLocked() {
 		return
 	}
 
-	screenW := win.GetSystemMetrics(0) // SM_CXSCREEN
-	screenH := win.GetSystemMetrics(1) // SM_CYSCREEN
+	// The desktop, every display included. A bar owns an edge of the desktop, and
+	// the shell credits the space against the whole of it, so proposing a
+	// rectangle the width of the primary display alone asks for less than the bar
+	// needs on a multi-display setup.
+	virtual := ab.scopeRect()
+	screenW := virtual.Width()
+	screenH := virtual.Height()
 	if screenW <= 0 || screenH <= 0 {
-		log.Printf("[NovaBar AppBar] GetSystemMetrics returned %dx%d; leaving reservation unchanged\n", screenW, screenH)
+		log.Printf("[NovaBar AppBar] The desktop size is %dx%d; leaving reservation unchanged\n", screenW, screenH)
 		return
 	}
 
@@ -254,20 +262,20 @@ func (ab *AppBarManager) updatePositionLocked() {
 	abd.HWnd = ab.hwnd
 	abd.UEdge = ab.edge
 
-	abd.Rc.Left = 0
-	abd.Rc.Right = screenW
-	abd.Rc.Top = 0
-	abd.Rc.Bottom = screenH
+	abd.Rc.Left = virtual.Left
+	abd.Rc.Right = virtual.Right
+	abd.Rc.Top = virtual.Top
+	abd.Rc.Bottom = virtual.Bottom
 
 	switch ab.edge {
 	case win.ABE_TOP:
-		abd.Rc.Bottom = ab.size
+		abd.Rc.Bottom = virtual.Top + ab.size
 	case win.ABE_BOTTOM:
-		abd.Rc.Top = screenH - ab.size
+		abd.Rc.Top = virtual.Bottom - ab.size
 	case win.ABE_LEFT:
-		abd.Rc.Right = ab.size
+		abd.Rc.Right = virtual.Left + ab.size
 	case win.ABE_RIGHT:
-		abd.Rc.Left = screenW - ab.size
+		abd.Rc.Left = virtual.Right - ab.size
 	}
 
 	// Ask the shell to shrink the work area around our rectangle, then commit it.
@@ -350,6 +358,29 @@ func (ab *AppBarManager) noteClaimed() {
 	ab.mu.Lock()
 	defer ab.mu.Unlock()
 	ab.lastClaim = time.Now()
+}
+
+// SetScope records how far this bar reaches.
+//
+// The AppBar API reserves a rectangle rather than an edge, so the shell reserves
+// what the bar asks for and nothing beyond it. A bar that asks for the primary
+// display alone leaves the other display's work area alone.
+func (ab *AppBarManager) SetScope(scope string) {
+	ab.mu.Lock()
+	ab.scope = scope
+	ab.mu.Unlock()
+}
+
+// scopeRect returns the rectangle this bar occupies on the desktop.
+//
+// The caller holds the lock.
+func (ab *AppBarManager) scopeRect() win.RECT {
+	if ab.scope == ScopePrimary {
+		if primary, err := win.PrimaryMonitor(); err == nil && primary.Width() > 0 {
+			return primary
+		}
+	}
+	return win.VirtualScreen()
 }
 
 // SetRequestedRect sets the rectangle this bar occupies, computed by the Manager.

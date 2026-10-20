@@ -322,6 +322,25 @@ func Schema() []Field {
 			},
 		},
 		Field{
+			Path:  "general.bar_scope",
+			Label: "Bar width",
+			Help:  "Whether the bars span every display or stay on the primary one.",
+			Type:  TypeChoice,
+			Options: []string{
+				BarScopeDesktop,
+				BarScopePrimary,
+			},
+			Get: func(c *Config) any { return c.General.BarScope },
+			Set: func(c *Config, v any) error {
+				s := strings.ToLower(strings.TrimSpace(fmt.Sprint(v)))
+				if s != BarScopeDesktop && s != BarScopePrimary {
+					return fmt.Errorf("%q is not one of %s, %s", s, BarScopeDesktop, BarScopePrimary)
+				}
+				c.General.BarScope = s
+				return nil
+			},
+		},
+		Field{
 			Path:   "hotkeys.rescue",
 			Label:  "Rescue hotkey",
 			Help:   "Restores the taskbar and exits NovaBar. Changing this changes how you get out.",

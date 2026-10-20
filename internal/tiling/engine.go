@@ -342,25 +342,32 @@ func (e *Engine) moveOne(p Placement) {
 	)
 }
 
-// applyFloating brings floating windows forward, sized to the primary work area.
+// applyFloating brings floating windows forward, sized to the work area of the
+// display they are on.
+//
+// The window's own display, not the primary one. A floating window the user dragged
+// to a second screen belongs to that screen, and moving it back to the primary is the
+// wrong answer twice over: the window lands where the user did not put it, and it
+// lands somewhere they cannot see it.
 func (e *Engine) applyFloating(placements []Placement) {
 	monitors := e.GetMonitors()
 	if len(monitors) == 0 {
 		return
 	}
 
-	workArea := monitors[0].WorkArea
-	size := Rect{
-		X:      workArea.X + workArea.Width*2/5,
-		Y:      workArea.Y + workArea.Height/5,
-		Width:  workArea.Width * 3 / 5,
-		Height: workArea.Height * 3 / 5,
-	}
-
 	for _, p := range placements {
 		if p.Action != ActionFloat || !win.IsValid(p.HWnd) {
 			continue
 		}
+
+		workArea := workAreaForMonitor(win.MonitorFromWindow(p.HWnd, win.MONITOR_DEFAULTTONEAREST), monitors)
+		size := Rect{
+			X:      workArea.X + workArea.Width*2/5,
+			Y:      workArea.Y + workArea.Height/5,
+			Width:  workArea.Width * 3 / 5,
+			Height: workArea.Height * 3 / 5,
+		}
+
 		_ = win.SetWindowPos(
 			p.HWnd,
 			win.HWND_TOP,
@@ -371,6 +378,22 @@ func (e *Engine) applyFloating(placements []Placement) {
 			win.SWP_NOACTIVATE,
 		)
 	}
+}
+
+// workAreaForMonitor returns the work area of a display.
+//
+// A display that is not in the list falls back to the first one, which is the
+// primary: a window whose display cannot be resolved was on the primary to begin
+// with.
+func workAreaForMonitor(hMonitor uintptr, monitors []MonitorInfo) Rect {
+	if hMonitor != 0 {
+		for _, m := range monitors {
+			if m.HMonitor == hMonitor {
+				return m.WorkArea
+			}
+		}
+	}
+	return monitors[0].WorkArea
 }
 
 // frameCorrectionFor measures a window's DWM border and returns the correction to
