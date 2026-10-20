@@ -37,7 +37,17 @@ permissions:
 
 jobs:
   sync:
-    runs-on: windows-latest
+    # Ubuntu rather than Windows, and the reason is the shell.
+    #
+    # The default shell on a Windows runner is PowerShell, which does not understand
+    # the `if ...; then ... fi` idiom this step uses, and the first run failed on
+    # exactly that. The generator is pure Go and touches nothing Windows-specific, so
+    # running it where bash is native removes the class of problem entirely rather than
+    # translating one shell into the other and hoping the translation is right.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
