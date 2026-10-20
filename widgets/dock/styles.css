@@ -141,11 +141,23 @@ html, body {
   user-select: none;
 }
 
+/*
+ * A real icon, drawn at the size it already is.
+ *
+ * The shell's icon is 32 pixels, and the tile is bigger than that, so a fixed
+ * size here would stretch every icon by a factor the browser smooths over. Letting
+ * the image keep its own size and capping it means the icon is drawn at one
+ * pixel per pixel, which is the difference between sharp and soft.
+ */
 .glyph-img {
-  width: calc(var(--icon) * 0.8);
-  height: calc(var(--icon) * 0.8);
+  max-width: calc(var(--icon) * 0.8);
+  max-height: calc(var(--icon) * 0.8);
+  width: auto;
+  height: auto;
   object-fit: contain;
-  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.45));
+  /* A light shadow to lift the icon off the wallpaper. A heavy one reads as a
+     black border around the icon, which is what it looked like before. */
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.3));
   pointer-events: none;
   user-select: none;
 }

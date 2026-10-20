@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/ngbcoder/NovaBar/internal/win"
@@ -101,6 +102,10 @@ type AppBarManager struct {
 	requested     win.RECT
 	grantedRect   win.RECT
 	grantedReason string
+
+	// lastClaim is when the bar last tried to claim its space, so a shell that has
+	// forgotten it cannot be retried in a tight loop.
+	lastClaim time.Time
 }
 
 // NewAppBarManager creates an instance of AppBarManager.
@@ -317,6 +322,34 @@ func (ab *AppBarManager) updatePositionLocked() {
 			win.SWP_NOACTIVATE|win.SWP_SHOWWINDOW,
 		)
 	}
+}
+
+// claimCooldown is how long a bar waits between attempts to re-claim its space.
+//
+// Re-claiming sets the whole desktop relayouting. When the shell has genuinely
+// forgotten the bar, every attempt fails, and without a cooldown the shell would be
+// relayouting every few seconds for ever: the desktop would never settle, windows
+// would flicker, and the shell would look hung.
+const claimCooldown = 30 * time.Second
+
+// claimDue reports whether enough time has passed to try claiming the space again.
+func (ab *AppBarManager) claimDue() bool {
+	ab.mu.Lock()
+	defer ab.mu.Unlock()
+
+	if time.Since(ab.lastClaim) < claimCooldown {
+		return false
+	}
+	ab.lastClaim = time.Now()
+	return true
+}
+
+// noteClaimed records that the reservation is in place, so the next check does not
+// have to wait out the cooldown before noticing a fresh loss.
+func (ab *AppBarManager) noteClaimed() {
+	ab.mu.Lock()
+	defer ab.mu.Unlock()
+	ab.lastClaim = time.Now()
 }
 
 // SetRequestedRect sets the rectangle this bar occupies, computed by the Manager.

@@ -171,6 +171,8 @@ func iconToImage(hIcon windows.Handle) (image.Image, error) {
 	pixels := make([]byte, width*height*4)
 	oldObj, _, _ := procSelectObject.Call(hdc, uintptr(ii.HbmColor))
 
+	// Only the top half is read: the bottom half of an icon's colour bitmap is
+	// the mask, and reading it would put a second copy of the mask into the image.
 	procGetDIBits.Call(
 		hdc,
 		uintptr(ii.HbmColor),
@@ -185,6 +187,33 @@ func iconToImage(hIcon windows.Handle) (image.Image, error) {
 		procSelectObject.Call(hdc, oldObj)
 	}
 
+	// The transparency for icons without an alpha channel comes from the AND
+	// mask. A set bit in the mask means the pixel is see-through.
+	//
+	// The mask is authoritative even for a 32 bit colour bitmap. Plenty of icons
+	// are 32 bit with an alpha byte that is not used at all, and their shape
+	// lives in the mask: reading the alpha instead leaves the icon on a black
+	// rectangle.
+	mask := readIconMask(ii.HbmMask, width, height)
+
+	// The mask only gets to decide when it has something to say.
+	useMask := false
+	for _, v := range mask {
+		if v != 0 {
+			useMask = true
+			break
+		}
+	}
+
+	// And an image with no usable transparency anywhere is opaque.
+	anyAlpha := false
+	for i := 3; i < len(pixels); i += 4 {
+		if pixels[i] != 0 {
+			anyAlpha = true
+			break
+		}
+	}
+
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
@@ -193,12 +222,114 @@ func iconToImage(hIcon windows.Handle) (image.Image, error) {
 			g := pixels[i+1]
 			r := pixels[i+2]
 			a := pixels[i+3]
-			if a == 0 {
+
+			switch {
+			case useMask:
+				if mask[y*width+x] != 0 {
+					a = 0
+				} else {
+					a = 255
+				}
+			case !anyAlpha:
 				a = 255
 			}
+
+			// A transparent pixel keeps its transparency. Turning it opaque is what
+			// put a black rectangle behind every icon.
 			img.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: a})
 		}
 	}
 
 	return img, nil
+}
+
+// readIconMask reads the AND mask of an icon, one bit per pixel.
+//
+// The mask is a one bit bitmap whose rows are padded to four bytes, and a set bit
+// means the pixel is see-through.
+func readIconMask(hbmMask windows.Handle, width, height int) []byte {
+	if hbmMask == 0 {
+		return nil
+	}
+
+	var bm bitmap
+	procGetObjectW.Call(
+		uintptr(hbmMask),
+		unsafe.Sizeof(bm),
+		uintptr(unsafe.Pointer(&bm)),
+	)
+
+	maskWidth := int(bm.Width)
+	maskHeight := int(bm.Height)
+	if maskWidth <= 0 || maskHeight <= 0 {
+		return nil
+	}
+
+	// Rows are padded to a four byte boundary.
+	stride := (maskWidth + 31) / 32 * 4
+	if maskHeight > height {
+		maskHeight = height
+	}
+
+	type bmiHeader struct {
+		Size          uint32
+		Width         int32
+		Height        int32
+		Planes        uint16
+		BitCount      uint16
+		Compression   uint32
+		SizeImage     uint32
+		XPelsPerMeter int32
+		YPelsPerMeter int32
+		ClrUsed       uint32
+		ClrImportant  uint32
+	}
+
+	var bmi struct {
+		Header bmiHeader
+		Colors [1]uint32
+	}
+
+	bmi.Header.Size = uint32(unsafe.Sizeof(bmi.Header))
+	bmi.Header.Width = int32(maskWidth)
+	bmi.Header.Height = int32(-maskHeight)
+	bmi.Header.Planes = 1
+	bmi.Header.BitCount = 1
+	bmi.Header.Compression = 0
+
+	hdc, _, _ := procCreateCompatibleDC.Call(0)
+	if hdc == 0 {
+		return nil
+	}
+	defer procDeleteDC.Call(hdc)
+
+	oldObj, _, _ := procSelectObject.Call(hdc, uintptr(hbmMask))
+	defer func() {
+		if oldObj != 0 {
+			procSelectObject.Call(hdc, oldObj)
+		}
+	}()
+
+	bits := make([]byte, stride*maskHeight)
+	procGetDIBits.Call(
+		hdc,
+		uintptr(hbmMask),
+		0,
+		uintptr(maskHeight),
+		uintptr(unsafe.Pointer(&bits[0])),
+		uintptr(unsafe.Pointer(&bmi)),
+		0,
+	)
+
+	// The result is one byte per pixel: non-zero where the pixel is see-through.
+	out := make([]byte, width*height)
+	for y := 0; y < height && y < maskHeight; y++ {
+		for x := 0; x < width && x < maskWidth; x++ {
+			bit := bits[y*stride+x/8] & (1 << uint(x%8))
+			if bit != 0 {
+				out[y*width+x] = 1
+			}
+		}
+	}
+	return out
 }

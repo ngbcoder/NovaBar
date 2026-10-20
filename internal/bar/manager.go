@@ -172,11 +172,12 @@ func (m *Manager) UpdatePosition() {
 // drawing itself, but the desktop is laid out as if the bar were not there, so a
 // maximized window ends up underneath it with its title bar hidden behind it.
 //
-// The recovery path is the usual cause. It writes the work area outright, because
-// writing it is the only way to clear a reservation left behind by a process that
-// died, and it clears everybody's while it is at it.
-//
 // The repair is the same call that registers a bar, so it costs nothing.
+//
+// It is also bounded. A shell that has genuinely forgotten the bar answers the
+// query with something that is not a bar, and re-claiming against that answer
+// would do nothing except set the desktop relayouting every few seconds, which
+// makes the shell unusable and hides the real problem behind a busy one.
 func (m *Manager) EnsureReserved() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -201,6 +202,12 @@ func (m *Manager) EnsureReserved() {
 			continue
 		}
 
+		// An answer bigger than the screen is not a bar. It is the shell saying it
+		// has nothing to give, and believing it would start a loop.
+		if granted > screenH || granted > screenW {
+			continue
+		}
+
 		lost := false
 		switch edge {
 		case win.ABE_TOP:
@@ -213,11 +220,19 @@ func (m *Manager) EnsureReserved() {
 			lost = work.Right > screenW-granted
 		}
 		if !lost {
+			ab.noteClaimed()
 			continue
 		}
 
-		log.Printf("[NovaBar AppBar] The %s bar lost its work-area reservation; claiming it again\n",
-			EdgeName(edge))
+		// One attempt every so often. A claim that does not take is a problem to
+		// report, not one to retry in a tight loop.
+		if !ab.claimDue() {
+			continue
+		}
+
+		log.Printf("[NovaBar AppBar] The %s bar lost its work-area reservation "+
+			"(granted %d, work area starts at %d); claiming it again\n",
+			EdgeName(edge), granted, work.Top)
 		ab.UpdatePosition()
 	}
 }
