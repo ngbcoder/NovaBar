@@ -3,12 +3,17 @@ package win
 import (
 	"fmt"
 	"log"
+	"sync"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
 // TaskbarState manages hiding and unhiding the Windows taskbars safely.
+//
+// The zero-value is not usable; call NewTaskbarState.
 type TaskbarState struct {
+	mu        sync.Mutex
 	primary   windows.HWND
 	secondary []windows.HWND
 	hidden    bool
@@ -31,16 +36,13 @@ func (ts *TaskbarState) Find() error {
 		return fmt.Errorf("failed to locate primary taskbar (Shell_TrayWnd): %w", err)
 	}
 	ts.primary = primary
-
 	secondary := make([]windows.HWND, 0, 4)
-	SetEnumWindowsHandler(func(hwnd windows.HWND, lParam uintptr) uintptr {
+	EnumWindowsWith(func(hwnd windows.HWND, lParam uintptr) uintptr {
 		if cName, err := GetClassName(hwnd); err == nil && cName == "Shell_SecondaryTrayWnd" {
 			secondary = append(secondary, hwnd)
 		}
 		return 1 // continue enumeration
-	})
-	EnumWindows(0)
-	ClearEnumWindowsHandler()
+	}, 0)
 
 	ts.secondary = secondary
 	return nil
@@ -51,7 +53,25 @@ func (ts *TaskbarState) Find() error {
 // The refresh is what makes a bottom AppBar possible. ShowWindow(SW_HIDE) alone leaves
 // the shell's cached work area unchanged, so the strip the taskbar occupied stays
 // excluded and a bottom bar asking for it is refused with nothing granted.
+//
+// The order of the steps is load bearing, and it is the opposite of the obvious one.
+//
+// The shell does not accept a hidden taskbar. Whenever the work area changes, the
+// shell lays the taskbar out afresh, and that layout restores the window: visible,
+// back at the bottom of the screen, within a second of being put away. A hide that
+// ends with a work-area write therefore undoes itself, which is exactly what this
+// function used to do and exactly what the user saw: a taskbar that came back.
+//
+// So the work area is released first and the windows are put away last. The shell is
+// left something to react to, and whatever it does with it, the last word belongs to
+// the hide.
+//
+// The shell's reaction can still arrive late, so the caller keeps a guard running
+// that puts the window away again without touching the work area.
 func (ts *TaskbarState) Hide() error {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
 	if ts.primary == 0 {
 		if err := ts.Find(); err != nil {
 			return err
@@ -61,25 +81,27 @@ func (ts *TaskbarState) Hide() error {
 	// Capture the work area before hiding so the change can be reported honestly.
 	before, _ := PrimaryWorkArea()
 
-	for _, h := range ts.all() {
-		hideOne(h)
-	}
-	ts.hidden = true
-
-	RefreshWorkArea()
-
-	// Hiding the taskbar window does not make Windows give its reservation back on
-	// Windows 11: the window disappears but the work area keeps the pixels it was holding.
-	// The shell then lays out against a work area with a phantom strip at the bottom, which
-	// is why a floating dock hovers above a gap where the taskbar used to be.
+	// Release the work area first. Hiding the taskbar window does not make Windows
+	// give its reservation back on Windows 11: the window disappears but the work
+	// area keeps the pixels it was holding. The shell then lays out against a work
+	// area with a phantom strip at the bottom, which is why a floating dock hovers
+	// above a gap where the taskbar used to be.
 	//
 	// Releasing it means writing the full screen as the work area outright. Done here
 	// rather than left to RefreshWorkArea because that only nudges the taskbar geometry
 	// and broadcasts, which this shell has already seen ignored.
-	if err := RestoreFullWorkArea(); err != nil {
+	RefreshWorkArea()
+	if err := SetFullWorkArea(false); err != nil {
 		log.Printf("[NovaBar Taskbar] Taskbars hidden but the work area could not be released: %v\n", err)
 	}
 	RefreshWorkArea()
+
+	// Now put the windows away, last. Everything above provokes the shell into
+	// laying the taskbar out again, and this is the step that has to come after.
+	for _, h := range ts.all() {
+		hideOne(h)
+	}
+	ts.hidden = true
 
 	after, _ := PrimaryWorkArea()
 	if after > before {
@@ -137,14 +159,113 @@ func hideOne(hwnd windows.HWND) {
 // crash, and a plain ShowWindow there would leave the taskbar restored to visibility but
 // parked off-screen at -32000,-32000. The user would still have no desktop, which is the
 // one outcome this whole subsystem exists to prevent.
+//
+// The position is left to the shell wherever it can be. The shell places its own
+// taskbar, and it knows things this code does not: whether the desktop is in
+// auto-hide mode, where the taskbar belongs on each monitor, and how far off-screen
+// it parks itself. Moving it here overrides all of that, and the result is a taskbar
+// in the wrong place that the shell corrects on its next layout pass anyway.
+//
+// A taskbar parked off-screen is the exception: that is not a position the user can
+// reach, so it is put back at the bottom of its monitor.
 func showOne(hwnd windows.HWND) {
 	_ = SetWindowPos(hwnd, 0, 0, 0, 0, 0,
 		SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW)
 	ShowWindow(hwnd, SW_SHOW)
+
+	rect, err := GetWindowRect(hwnd)
+	if err != nil || rect.Left > -1000 || rect.Top > -1000 {
+		return
+	}
+
+	// Parked off-screen. Put it at the bottom of its monitor, which is where the
+	// shell would put it.
+	hMon := MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+	if hMon == 0 {
+		return
+	}
+	var mi MONITORINFO
+	mi.CbSize = uint32(unsafe.Sizeof(mi))
+	if !GetMonitorInfo(hMon, &mi) || mi.RcMonitor.Height() == 0 {
+		return
+	}
+
+	width, height := rect.Width(), rect.Height()
+	if width <= 1 {
+		width = mi.RcMonitor.Width()
+	}
+	if height <= 1 {
+		height = defaultTaskbarHeight
+	}
+
+	_ = SetWindowPos(hwnd, 0, mi.RcMonitor.Left, mi.RcMonitor.Bottom-height, width, height,
+		SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW)
+}
+
+// HideWindows re-hides the taskbar windows without touching the work area.
+//
+// This is the guard's primitive, and it is separate from Hide on purpose. Hiding the
+// windows and releasing the work area are two different jobs, and the second one
+// provokes the shell into showing the first one again: rewriting the work area makes
+// the shell lay the taskbar out afresh, and a fresh layout restores the window.
+//
+// So the guard re-hides the windows and leaves the work area alone.
+//
+// It reports whether it had to act, so the caller can stay quiet when there is
+// nothing to do.
+func (ts *TaskbarState) HideWindows() bool {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	// The shell replaces the taskbar window when it lays the desktop out again, so
+	// the handles have to be refreshed when they go stale.
+	//
+	// This is not a detail. A stale handle reads as "not visible", so a guard
+	// holding one believes there is nothing to do while the taskbar is on screen.
+	// The shell recreates the window every time the work area changes, which is
+	// exactly when the taskbar comes back, so a guard that trusts its handles
+	// stops working at the first bar resize.
+	if ts.stale() {
+		_ = ts.Find()
+	}
+
+	acted := false
+	for _, hwnd := range ts.all() {
+		if !IsWindowVisible(hwnd) {
+			continue
+		}
+		hideOne(hwnd)
+		acted = true
+	}
+
+	if acted {
+		ts.hidden = true
+	}
+	return acted
+}
+
+// stale reports whether any of the known taskbar handles no longer refers to a live
+// window.
+func (ts *TaskbarState) stale() bool {
+	if ts.primary == 0 {
+		return true
+	}
+	if !IsValid(ts.primary) {
+		return true
+	}
+	for _, hwnd := range ts.secondary {
+		if !IsValid(hwnd) {
+			return true
+		}
+	}
+	return false
 }
 
 // Show restores visibility to all taskbar windows and refreshes the work area.
 func (ts *TaskbarState) Show() error {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
 	before, _ := PrimaryWorkArea()
 
 	// Re-find in case handles changed across a monitor or shell restart.
@@ -153,11 +274,16 @@ func (ts *TaskbarState) Show() error {
 	for _, h := range ts.all() {
 		// Undo the off-screen parking before showing, otherwise the taskbar reappears in
 		// the top-left corner instead of at the bottom.
-		_ = SetWindowPos(h, 0, 0, 0, 0, 0,
-			SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW)
-		ShowWindow(h, SW_SHOW)
+		showOne(h)
 	}
 	ts.hidden = false
+
+	// The work area has to come back to the value Windows ships with, or the shell
+	// keeps the taskbar below the bottom edge of the screen and the user gets a
+	// taskbar they cannot see.
+	if err := restoreTaskbars(); err != nil {
+		log.Printf("[NovaBar Taskbar] Could not restore the work area: %v\n", err)
+	}
 
 	RefreshWorkArea()
 	if after, settled := WorkAreaAfterInsets(before); settled {
@@ -168,7 +294,63 @@ func (ts *TaskbarState) Show() error {
 
 // IsHidden returns whether the taskbars are currently hidden.
 func (ts *TaskbarState) IsHidden() bool {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
 	return ts.hidden
+}
+
+// restoreTaskbars brings the taskbars and the work area back to the state Windows
+// ships with.
+//
+// The order is the whole point, because each step undoes the previous one:
+//
+//   - Showing a taskbar is not enough on its own. The shell places the taskbar
+//     relative to the work area, so a taskbar shown while the work area is the full
+//     screen is placed below the bottom edge of the screen: visible as a window,
+//     invisible to the person who needs it.
+//   - Writing the full screen is not enough either. It is the only value that clears
+//     a stale AppBar reservation, but it is also what tells the shell there is no
+//     taskbar, and the shell parks the taskbar off-screen in response.
+//   - Writing the work area Windows ships with is what puts the taskbar back where
+//     it belongs, but only once the taskbar is where it belongs.
+//
+// So: show and place them, clear the stale reservations, place them again, and
+// finally write the work area the shell expects.
+func restoreTaskbars() error {
+	// Show every taskbar and put it at the bottom of its monitor.
+	//
+	// The order matters, and it is not the obvious one. The full screen is the
+	// value that clears a stale AppBar reservation, and it was used here for
+	// years, but writing it is what makes the shell hide the taskbar: told that
+	// the whole screen is available, the shell concludes there is no room for a
+	// taskbar and hides the one there is. Its reaction to that write lands late,
+	// so the taskbar is put back first and the write, if any, comes after.
+	showAllTaskbars()
+
+	// The work area Windows ships with, persisted so it survives a reboot.
+	if err := RestoreNormalWorkArea(); err != nil {
+		log.Printf("[NovaBar Taskbar] WARNING: could not reset the work area: %v\n", err)
+		return err
+	}
+
+	// Let the shell finish rearranging before the last word is said.
+	WaitForWorkAreaSettle()
+
+	log.Println("[NovaBar Taskbar] Work area reset to the full primary display.")
+	return nil
+}
+
+// showAllTaskbars shows every taskbar window and puts it at the bottom of its monitor.
+func showAllTaskbars() {
+	if h, err := FindWindow("Shell_TrayWnd", ""); err == nil && h != 0 {
+		showOne(h)
+	}
+	EnumWindowsWith(func(hwnd windows.HWND, lParam uintptr) uintptr {
+		if cName, err := GetClassName(hwnd); err == nil && cName == "Shell_SecondaryTrayWnd" {
+			showOne(hwnd)
+		}
+		return 1
+	}, 0)
 }
 
 // ForceRestoreTaskbar is the last line of defence: it restores the taskbar and forces
@@ -176,8 +358,11 @@ func (ts *TaskbarState) IsHidden() bool {
 //
 // This is what runs in the recovery path, so it does everything rather than the minimum:
 //   - re-shows the taskbar, found from scratch rather than a cached handle
-//   - calls RestoreFullWorkArea, which is the only thing that clears a stale AppBar
-//     reservation left behind by a process that was killed without running its cleanup
+//   - clears a stale AppBar reservation left behind by a process that was killed
+//     without running its cleanup
+//   - puts the taskbar back at the bottom of its monitor, because the shell will
+//     otherwise leave it below the bottom edge of the screen where nobody can see it
+//   - writes the work area back to the value Windows ships with, and persists it
 //   - nudges the shell into a layout pass and broadcasts the change to applications
 //
 // Callers are the watchdog and `shellctl --rescue`. Running the taskbar again is
@@ -185,24 +370,8 @@ func (ts *TaskbarState) IsHidden() bool {
 // did not need it costs nothing, and failing to restore one that did is unrecoverable
 // without a reboot.
 func ForceRestoreTaskbar() {
-	if h, err := FindWindow("Shell_TrayWnd", ""); err == nil && h != 0 {
-		showOne(h)
-	}
-	SetEnumWindowsHandler(func(hwnd windows.HWND, lParam uintptr) uintptr {
-		if cName, err := GetClassName(hwnd); err == nil && cName == "Shell_SecondaryTrayWnd" {
-			showOne(hwnd)
-		}
-		return 1
-	})
-	EnumWindows(0)
-	ClearEnumWindowsHandler()
-
-	// Absolute reset of the work area. This is the step that matters: without it a
-	// desktop left shrunk by a dead process's AppBar registration stays shrunk.
-	if err := RestoreFullWorkArea(); err != nil {
-		log.Printf("[NovaBar Taskbar] WARNING: could not reset the work area: %v\n", err)
-	} else {
-		log.Println("[NovaBar Taskbar] Work area reset to the full primary display.")
+	if err := restoreTaskbars(); err != nil {
+		log.Printf("[NovaBar Taskbar] WARNING: the desktop was not fully restored: %v\n", err)
 	}
 
 	RefreshWorkArea()

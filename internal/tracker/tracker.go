@@ -163,7 +163,7 @@ func (t *WindowTracker) processName(pid uint32) string {
 func (t *WindowTracker) Refresh() {
 	found := make(map[windows.HWND]*WindowInfo, 64)
 
-	win.SetEnumWindowsHandler(func(hwnd windows.HWND, lParam uintptr) uintptr {
+	win.EnumWindowsWith(func(hwnd windows.HWND, lParam uintptr) uintptr {
 		if !t.IsManageable(hwnd) {
 			return 1
 		}
@@ -183,9 +183,7 @@ func (t *WindowTracker) Refresh() {
 			IsVisible: true,
 		}
 		return 1
-	})
-	win.EnumWindows(0)
-	win.ClearEnumWindowsHandler()
+	}, 0)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()

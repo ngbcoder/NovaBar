@@ -22,6 +22,54 @@ const (
 
 var procSystemParametersInfoW = modUser32.NewProc("SystemParametersInfoW")
 
+// SetWorkArea writes the desktop work area.
+//
+// The persist flag controls whether the value is written to the user profile as well.
+// Persisting is right for "the whole screen", which is the ordinary state of a working
+// desktop, and wrong for a reduced work area, which would shrink the desktop for the
+// user after the shell exited.
+//
+// Returns an error rather than logging: callers in the recovery path need to know.
+func SetWorkArea(rect RECT, persist bool) error {
+	flags := uintptr(SPIF_SENDCHANGE)
+	if persist {
+		flags |= SPIF_UPDATEINIFILE
+	}
+
+	r1, _, err := procSystemParametersInfoW.Call(
+		uintptr(SPI_SETWORKAREA),
+		0,
+		uintptr(unsafe.Pointer(&rect)),
+		flags,
+	)
+	if r1 == 0 {
+		// err is often a stale errno on success paths for this call; report the
+		// boolean and keep the message generic so callers are not misled.
+		return fmt.Errorf("SystemParametersInfo(SPI_SETWORKAREA) failed (r1=0, lastErr=%v)", err)
+	}
+	return nil
+}
+
+// SetFullWorkArea writes the whole screen as the work area.
+//
+// The persist flag matters more here than it looks. Persisting "the whole screen"
+// writes "there is no taskbar" into the user profile, and the shell then places the
+// taskbar below the bottom edge of the screen on every login, until something puts
+// the profile back. Hiding the taskbar is a live state and should not outlive the
+// process that hid it.
+//
+// Returns an error rather than logging: callers in the recovery path need to know.
+func SetFullWorkArea(persist bool) error {
+	screenW := GetSystemMetrics(0) // SM_CXSCREEN
+	screenH := GetSystemMetrics(1) // SM_CYSCREEN
+	if screenW <= 0 || screenH <= 0 {
+		return errors.New("screen metrics unavailable; cannot reset the work area")
+	}
+
+	full := RECT{Left: 0, Top: 0, Right: screenW, Bottom: screenH}
+	return SetWorkArea(full, persist)
+}
+
 // RestoreFullWorkArea forces the desktop work area back to the entire primary display.
 //
 // This is the blunt instrument recovery needs, and it exists because the polite ones
@@ -31,37 +79,62 @@ var procSystemParametersInfoW = modUser32.NewProc("SystemParametersInfoW")
 // taskbar only triggers a relayout, which recomputes around the stale reservation
 // rather than discarding it.
 //
-// SPIF_UPDATEINIFILE is deliberate. The value written is "the whole screen", which is
-// the ordinary state of a working desktop, so persisting it is harmless and makes the
-// recovery survive a reboot. Writing a reduced work area to the profile would be the
-// dangerous version of this, which is why it is never done.
+// It is a half-measure on its own. A full-screen work area tells the shell that no
+// taskbar is there, and the shell obliges by placing the taskbar below the bottom
+// edge of the screen: a window that exists, that the shell believes is visible, and
+// that nobody can see. Use RestoreNormalWorkArea to put the desktop back.
 //
 // Returns an error rather than logging: callers in the recovery path need to know.
 func RestoreFullWorkArea() error {
+	return SetFullWorkArea(true)
+}
+
+// defaultTaskbarHeight is the height of the Windows 11 taskbar at 100% scaling.
+//
+// It is only a fallback: the real height is measured from the taskbar window, which
+// is better because the height changes with the display scale.
+const defaultTaskbarHeight = 48
+
+// NormalWorkArea returns the work area Windows ships with: the screen minus the
+// strip the taskbar occupies.
+//
+// This is the value the desktop has to be put back to. A full-screen work area
+// tells the shell that no taskbar is there, and the shell obliges by placing the
+// taskbar below the bottom edge of the screen: a window that exists, that the
+// shell believes is visible, and that nobody can see.
+func NormalWorkArea() (RECT, error) {
 	screenW := GetSystemMetrics(0) // SM_CXSCREEN
 	screenH := GetSystemMetrics(1) // SM_CYSCREEN
 	if screenW <= 0 || screenH <= 0 {
-		return errors.New("screen metrics unavailable; cannot reset the work area")
+		return RECT{}, errors.New("screen metrics unavailable; cannot compute the work area")
 	}
 
-	var full RECT
-	full.Left = 0
-	full.Top = 0
-	full.Right = screenW
-	full.Bottom = screenH
-
-	r1, _, err := procSystemParametersInfoW.Call(
-		uintptr(SPI_SETWORKAREA),
-		0,
-		uintptr(unsafe.Pointer(&full)),
-		uintptr(SPIF_UPDATEINIFILE|SPIF_SENDCHANGE),
-	)
-	if r1 == 0 {
-		// err is often a stale errno on success paths for this call; report the
-		// boolean and keep the message generic so callers are not misled.
-		return fmt.Errorf("SystemParametersInfo(SPI_SETWORKAREA) failed (r1=0, lastErr=%v)", err)
+	height := int32(defaultTaskbarHeight)
+	if hwnd, err := FindWindow("Shell_TrayWnd", ""); err == nil && hwnd != 0 {
+		// The taskbar window is the authority on its own height. It is measured
+		// rather than assumed because the height follows the display scale.
+		//
+		// A window parked off-screen at zero size would report nothing useful, so
+		// an implausible measurement is ignored in favour of the default.
+		if rect, err := GetWindowRect(hwnd); err == nil && rect.Height() > 8 && rect.Height() < 200 {
+			height = rect.Height()
+		}
 	}
-	return nil
+
+	return RECT{Left: 0, Top: 0, Right: screenW, Bottom: screenH - height}, nil
+}
+
+// RestoreNormalWorkArea puts the work area back the way Windows ships it: the screen
+// minus the strip the taskbar occupies.
+//
+// It is persisted, because the point of the recovery path is that the desktop comes
+// back, including after a reboot.
+func RestoreNormalWorkArea() error {
+	normal, err := NormalWorkArea()
+	if err != nil {
+		return err
+	}
+	return SetWorkArea(normal, true)
 }
 
 // RefreshWorkArea forces Windows to recompute the desktop work area and tells every
@@ -94,7 +167,7 @@ func nudgeTaskbars() {
 		exists bool
 	}
 
-	SetEnumWindowsHandler(func(hwnd windows.HWND, lParam uintptr) uintptr {
+	EnumWindowsWith(func(hwnd windows.HWND, lParam uintptr) uintptr {
 		class, err := GetClassName(hwnd)
 		if err != nil || (class != "Shell_TrayWnd" && class != "Shell_SecondaryTrayWnd") {
 			return 1
@@ -117,9 +190,7 @@ func nudgeTaskbars() {
 			SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE)
 		toRestore = append(toRestore, entry)
 		return 1
-	})
-	EnumWindows(0)
-	ClearEnumWindowsHandler()
+	}, 0)
 
 	// Put them back, so the visible shell is not left one pixel wider.
 	for _, entry := range toRestore {
@@ -168,6 +239,39 @@ func WorkAreaAfterInsets(before Height) (Height, bool) {
 			return after, false
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// workAreaSettleTimeout is how long the work area is watched for further changes
+// before it is considered settled.
+const workAreaSettleTimeout = 300 * time.Millisecond
+
+// WaitForWorkAreaSettle waits until the work area stops changing.
+//
+// The shell reacts to a work-area change asynchronously, and its reaction includes
+// repositioning the taskbar. A caller that writes the work area and then puts the
+// taskbar back can have the shell's late reaction undo the work, which is how a
+// rescue ends with the taskbar parked off-screen: the shell had the last word, and
+// its word was "there is no room for a taskbar".
+func WaitForWorkAreaSettle() {
+	previous, err := PrimaryWorkArea()
+	if err != nil {
+		return
+	}
+
+	deadline := time.Now().Add(workAreaSettleTimeout)
+	for time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+
+		current, err := PrimaryWorkArea()
+		if err != nil {
+			return
+		}
+		if current != previous {
+			// It moved, so it is not settled yet. The clock starts again.
+			previous = current
+			deadline = time.Now().Add(workAreaSettleTimeout)
+		}
 	}
 }
 

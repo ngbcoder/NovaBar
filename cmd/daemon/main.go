@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -49,6 +50,14 @@ const statsPollInterval = 2 * time.Second
 // Polling cannot fault.
 const mediaPollInterval = 2 * time.Second
 
+// taskbarGuardInterval is how often the taskbar is checked for the shell having
+// brought it back.
+//
+// Half a second is well inside the time the shell takes to restore the window, so
+// the taskbar is never visibly there. The check is a window walk, and half a second
+// is frequent enough to be unnoticeable and rare enough to cost nothing.
+const taskbarGuardInterval = 500 * time.Millisecond
+
 // daemon owns the long-lived components and their shutdown ordering.
 type daemon struct {
 	cfg     config.Config
@@ -59,6 +68,20 @@ type daemon struct {
 	surfaces      map[string]*webview.Surface // keyed by bar name
 	widgetSecrets map[string]string           // keyed by bar name
 	widgets       string                      // resolved widget root
+
+	// hideTaskbar is whether the native taskbar should be hidden.
+	//
+	// It is kept apart from the config because the guard reads it on a timer, and
+	// the config is written from the config watcher and the settings surface.
+	hideTaskbar atomic.Bool
+
+	// quitting is set once the daemon is on its way out, and stops the guard from
+	// touching the taskbar while the desktop is being restored.
+	quitting atomic.Bool
+
+	// guardMu is held while the guard is hiding the taskbar, so the teardown can
+	// wait for an action in flight rather than racing it.
+	guardMu sync.Mutex
 
 	// launcher is the transient launcher overlay, nil when not showing. Unlike the bars
 	// it reserves no work area, because reserving space for something that appears for
@@ -103,6 +126,13 @@ type daemon struct {
 
 	// pendingOnboarding is set during setup and consumed once the pump is running.
 	pendingOnboarding bool
+
+	// pumpTasks carries work that has to run on the message pump thread.
+	//
+	// WebView2 is bound to the thread that created it, so a bar resize has to
+	// happen there. The config watcher and the settings surface both run on other
+	// goroutines, so they hand the work over rather than doing it themselves.
+	pumpTasks chan func()
 }
 
 // Run starts the daemon and pumps messages until quit.
@@ -122,6 +152,7 @@ func Run() {
 		widgetSecrets: make(map[string]string, 4),
 		trk:           tracker.NewWindowTracker(),
 		spaces:        workspace.NewManager(),
+		pumpTasks:     make(chan func(), 8),
 	}
 	// Capture the pump thread before anything can signal us, so an early Ctrl+C still
 	// reaches the message loop.
@@ -148,6 +179,7 @@ func Run() {
 	go d.statsPump()
 	go d.configPump()
 	go d.mediaPump()
+	go d.taskbarGuard()
 
 	log.Println("[NovaBar] Running message pump. Use 'shellctl --rescue' or the rescue hotkey to exit.")
 
@@ -214,9 +246,11 @@ func (d *daemon) setup() error {
 		} else {
 			log.Println("[NovaBar] Native taskbars hidden (watchdog is watching this process)")
 		}
+		d.hideTaskbar.Store(true)
 	} else {
 		// Make sure a previous crashed run did not leave them hidden.
 		win.ForceRestoreTaskbar()
+		d.hideTaskbar.Store(false)
 	}
 
 	d.applyBars(d.cfg)
@@ -603,6 +637,20 @@ func (d *daemon) warnAboutCollapsedBars() {
 func (d *daemon) teardown() {
 	log.Println("[NovaBar] Restoring the desktop")
 
+	// The guard stands down first.
+	//
+	// It hides the taskbar every half second, and the teardown shows it again.
+	// If the guard is still running, one of its ticks can land after the taskbar
+	// has been restored, and the last word belongs to the hide: the taskbar ends
+	// the shutdown hidden and parked off-screen. That is how a rescue ends with
+	// no taskbar and no way to get one back.
+	d.quitting.Store(true)
+	d.hideTaskbar.Store(false)
+
+	// Wait for a hide in flight to finish, so the restore below is the last word.
+	d.guardMu.Lock()
+	d.guardMu.Unlock()
+
 	if d.hotkeys != nil {
 		d.hotkeys.Stop()
 	}
@@ -686,7 +734,69 @@ var pumpThread uint32
 // msgQuit is a private window message used to exit the loop cleanly.
 const msgQuit = 0x7F42 // WM_APP range
 
+// msgPumpTask is a private window message used to wake the pump so it can run work
+// that has to happen on the pump thread.
+const msgPumpTask = 0x7F43 // WM_APP range
+
+// pumpTaskTimeout bounds how long a hand-off waits for the pump to pick the work up.
+//
+// It is generous, because a slow hand-off is better than a dropped one: the work
+// being handed over is usually a bar resize, and dropping it would leave the shell
+// showing a bar of the wrong size with no error anywhere.
+const pumpTaskTimeout = 5 * time.Second
+
 // pump runs the Win32 message loop.
+// onPumpThread runs fn on the message pump thread and waits for it to finish.
+//
+// WebView2 is bound to the thread that created it. Resizing a bar's surface from
+// any other thread is not a no-op: the controller throws, and the exception takes
+// the daemon with it, which is a crash the user sees as the shell disappearing and
+// the taskbar coming back.
+//
+// The wait matters as much as the hand-off. The caller wants to know the change has
+// been applied before it carries on, and returning early would let two changes
+// overlap and leave the bars in a state neither of them intended.
+func (d *daemon) onPumpThread(fn func()) {
+	if d.pumpTasks == nil {
+		fn()
+		return
+	}
+
+	done := make(chan struct{})
+	select {
+	case d.pumpTasks <- func() {
+		defer close(done)
+		fn()
+	}:
+	case <-time.After(pumpTaskTimeout):
+		log.Println("[NovaBar] The message pump did not take the work; skipping it")
+		return
+	}
+
+	// The pump has to be woken up, or the task sits in the channel until the next
+	// message arrives.
+	_ = win.PostThreadMessage(d.pumpThread, msgPumpTask, 0, 0)
+
+	select {
+	case <-done:
+	case <-time.After(pumpTaskTimeout):
+		log.Println("[NovaBar] The message pump did not finish the work in time")
+	}
+}
+
+// runPumpTasks runs the work queued for the pump thread.
+func (d *daemon) runPumpTasks() {
+	for {
+		select {
+		case task := <-d.pumpTasks:
+			task()
+		default:
+			return
+		}
+	}
+}
+
+// pump runs the message loop.
 func (d *daemon) pump() {
 	var msg win.MSG
 	for {
@@ -704,6 +814,8 @@ func (d *daemon) pump() {
 			log.Println("[NovaBar] Quit requested")
 			win.PostQuitMessage(0)
 			return
+		case msgPumpTask:
+			d.runPumpTasks()
 		case win.WM_HOTKEY:
 			d.handleHotkey(msg.WParam)
 		}
@@ -1270,8 +1382,42 @@ func (d *daemon) statsPump() {
 	}
 }
 
-// mediaPump keeps the media session current.
+// taskbarGuard keeps the native taskbar hidden.
 //
+// The shell does not accept a hidden taskbar. Whenever the work area changes, which
+// is whenever a bar is registered, resized or moved, the shell lays the taskbar out
+// afresh, and that layout restores the window: visible again, back at the bottom of
+// the screen, within a second of being put away. A hide that ends with a work-area
+// write therefore undoes itself, which is what the user sees: a taskbar that keeps
+// coming back.
+//
+// The defence is to put it away again, and crucially to do that without touching the
+// work area, because touching the work area is the thing that provokes the shell.
+// Re-hiding the windows alone provokes nothing, and the shell then leaves them
+// alone.
+//
+// The guard stops the moment the setting is turned off, and the taskbars are shown
+// again by the settings path.
+func (d *daemon) taskbarGuard() {
+	ticker := time.NewTicker(taskbarGuardInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if d.quitting.Load() || !d.hideTaskbar.Load() {
+			continue
+		}
+
+		d.guardMu.Lock()
+		if !d.quitting.Load() && d.hideTaskbar.Load() {
+			if d.taskbars.HideWindows() {
+				log.Println("[NovaBar Taskbar] The shell brought the taskbar back; hiding it again")
+			}
+		}
+		d.guardMu.Unlock()
+	}
+}
+
+// mediaPump keeps the media session current.
 // The media stack does publish change events, but subscribing to one means a callback
 // crossing a thread boundary, and that is where the crashes in this area came from.
 // Polling is dull and cannot fault, and a couple of seconds is well inside what a
@@ -1340,20 +1486,17 @@ func (d *daemon) configPump() {
 		// Adding, removing or resizing bars takes effect immediately; this is the
 		// whole point of holding several [[bars]] entries in config.
 		//
-		// Taskbar visibility is applied first so the shell has recomputed the work area
-		// before the bars ask it for space.
-		if cfg.General.HideTaskbar && !d.taskbars.IsHidden() {
-			if err := d.taskbars.Hide(); err != nil {
-				log.Printf("[NovaBar] Could not hide taskbars on config reload: %v\n", err)
-			}
-		} else if !cfg.General.HideTaskbar && d.taskbars.IsHidden() {
-			if err := d.taskbars.Show(); err != nil {
-				log.Printf("[NovaBar] Could not restore taskbars on config reload: %v\n", err)
-			}
-		}
+		// It happens on the message pump thread, because the bars own WebView2
+		// surfaces and WebView2 is bound to the thread that created it. Doing it
+		// here would kill the daemon.
+		d.onPumpThread(func() {
+			// Taskbar visibility is applied first so the shell has recomputed the work
+			// area before the bars ask it for space.
+			d.applyTaskbarVisibility(cfg)
 
-		d.applyBars(cfg)
-		d.syncDock(cfg)
+			d.applyBars(cfg)
+			d.syncDock(cfg)
+		})
 
 		d.retile()
 		d.publishWindows()

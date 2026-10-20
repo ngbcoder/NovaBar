@@ -116,6 +116,10 @@ const (
 // Window messages handled on the pinned message pump thread.
 const (
 	WM_HOTKEY  = 0x0312
+
+	// WM_APP is the base of the private message range. NovaBar uses one message
+	// from it to wake the pump for work that has to run on the pump thread.
+	WM_APP = 0x8000
 	WM_CLOSE   = 0x0010
 	WM_DESTROY = 0x0002
 )

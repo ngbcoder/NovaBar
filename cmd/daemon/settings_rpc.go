@@ -64,8 +64,15 @@ func registerConfigMethods(r *rpc.Server, d *daemon) {
 		d.cfg = next
 		d.engine.SetConfig(next)
 		d.engine.DetectMonitors()
-		d.applyBars(next)
-		d.applyTaskbarVisibility(next)
+
+		// The bars own WebView2 surfaces, and WebView2 is bound to the thread that
+		// created it, so the work is handed to the message pump thread. Doing it
+		// here would kill the daemon.
+		d.onPumpThread(func() {
+			d.applyBars(next)
+			d.applyTaskbarVisibility(next)
+		})
+
 		d.hotkeys.Register(next)
 		d.retile()
 		d.publishWindows()
@@ -179,10 +186,16 @@ func (d *daemon) applyTaskbarVisibility(cfg config.Config) {
 		if err := d.taskbars.Hide(); err != nil {
 			log.Printf("[NovaBar] Could not hide taskbars: %v\n", err)
 		}
+		d.hideTaskbar.Store(true)
 	} else if !cfg.General.HideTaskbar && d.taskbars.IsHidden() {
 		if err := d.taskbars.Show(); err != nil {
 			log.Printf("[NovaBar] Could not restore taskbars: %v\n", err)
 		}
+		d.hideTaskbar.Store(false)
+	} else {
+		// The taskbar state already matches the config, but the guard's flag still
+		// has to follow it.
+		d.hideTaskbar.Store(cfg.General.HideTaskbar)
 	}
 }
 

@@ -34,47 +34,40 @@ var (
 	enumMu      sync.RWMutex
 	enumHandler EnumProc
 	enumDepth   int
-	enumOwner   uintptr
+
+	// enumWalkMu serializes whole walks.
+	enumWalkMu sync.Mutex
 )
 
-// SetEnumWindowsHandler installs the handler invoked by the shared EnumWindows
-// trampoline. Only one handler may be installed at a time, because the trampoline is
-// a single fixed thunk; calls are serialized.
+// EnumWindowsWith enumerates top-level windows, invoking proc for each.
 //
-// This is not re-entrant: do not call EnumWindows from inside an EnumProc.
-func SetEnumWindowsHandler(proc EnumProc) {
+// The visitor is passed in rather than installed globally, and the walk is
+// serialized against every other walk.
+//
+// This matters because the trampoline is a single fixed thunk with one handler
+// slot. Two walks running at once would invoke each other's visitors: one would
+// see the other's windows and the other would see none. That is not a crash, so it
+// goes unnoticed, but it loses windows — and it loses them silently, which is how a
+// guard that re-hides the taskbar ends up doing nothing.
+//
+// Returns true when at least one window was visited.
+func EnumWindowsWith(proc EnumProc, lParam uintptr) bool {
+	enumWalkMu.Lock()
+	defer enumWalkMu.Unlock()
+
 	enumMu.Lock()
 	enumHandler = proc
-	enumMu.Unlock()
-}
-
-// EnumWindows enumerates top-level windows using the shared trampoline.
-//
-// If a handler is installed via SetEnumWindowsHandler it is invoked for each window;
-// otherwise an empty enumeration runs. Returns true when at least one window was
-// visited.
-func EnumWindows(lParam uintptr) bool {
-	enumMu.Lock()
-	if enumDepth > 0 {
-		enumMu.Unlock()
-		return false
-	}
 	enumDepth++
-	enumOwner = uintptr(0)
 	enumMu.Unlock()
 
 	r1, _, _ := procEnumWindows.Call(enumWindowsCallback, lParam)
 
 	enumMu.Lock()
 	enumDepth = 0
+	enumHandler = nil
 	enumMu.Unlock()
 
 	return r1 != 0
-}
-
-// ClearEnumWindowsHandler removes the installed handler.
-func ClearEnumWindowsHandler() {
-	SetEnumWindowsHandler(nil)
 }
 
 // enumMonitorsCallback is the shared EnumDisplayMonitors trampoline.
