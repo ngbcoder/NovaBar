@@ -212,15 +212,22 @@ const (
 	VK_SPACE = 0x20
 	VK_LEFT  = 0x25
 	VK_RIGHT = 0x27
-	VK_1     = 0x31
-	VK_2     = 0x32
-	VK_3     = 0x33
-	VK_4     = 0x34
-	VK_5     = 0x35
-	VK_6     = 0x36
-	VK_7     = 0x37
-	VK_8     = 0x38
-	VK_9     = 0x39
+	// VK_LWIN is the left Windows key.
+	//
+	// A hotkey bound to it is the Win+VK_LWIN combination, which Windows does not claim
+	// for itself, so an application can take the bare Windows key. Measured on Windows 11:
+	// RegisterHotKey for Win alone succeeds, while Ctrl+Esc and Win+Space are both
+	// already taken.
+	VK_LWIN = 0x5B
+	VK_1    = 0x31
+	VK_2    = 0x32
+	VK_3    = 0x33
+	VK_4    = 0x34
+	VK_5    = 0x35
+	VK_6    = 0x36
+	VK_7    = 0x37
+	VK_8    = 0x38
+	VK_9    = 0x39
 )
 
 // HotkeyID identifies a registered hotkey in WM_HOTKEY messages. Ids are unique

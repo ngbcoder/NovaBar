@@ -188,7 +188,7 @@ func iconToImage(hIcon windows.Handle) (image.Image, error) {
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
-			i := (y * width + x) * 4
+			i := (y*width + x) * 4
 			b := pixels[i]
 			g := pixels[i+1]
 			r := pixels[i+2]

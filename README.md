@@ -254,34 +254,17 @@ sdk.subscribe("windows.updated", onWindows);
 
 ## Roadmap
 
-| Milestone | State |
-| --- | --- |
-| M1 Win32 core, safety foundations | Done |
-| M2 Pure-function tiling engine | Done |
-| M3 AppBar, workspaces, taskbar management | Done (multi-bar, multi-edge) |
-| M4 WebView2 UI, widget platform | Done (bar, dock, launcher, settings widgets, manifest permissions) |
-| M5 App launcher, GSMTC media | Partial — launcher done, GSMTC activation done, session reads moved to M12 |
-| M6 Settings menu | Done — `Ctrl+Alt+S`, controls generated from the config schema |
-| M7 Per-app volume | Done (Core Audio sessions, dock wheel, `audio.read`/`audio.control`) |
-| M8 Keyboard window management | **Next** — the biggest product gap |
-| M9 Multi-monitor correctness | Planned — a bug, and it blocks real use |
-| M10 HiDPI and per-monitor scaling | Planned |
-| M11 Accessibility | Planned |
-| M12 GSMTC media reads | Planned — finishes M5 |
-| M13 App menu: grid, jump lists, recent files | Planned |
-| M14 Global file search | Planned |
-| M15 Command palette | Planned |
-| M16 Window previews and groups | Planned |
-| M17 Layout presets | Planned |
-| M18 Per-app window memory | Planned |
-| M19 Notifications | Planned |
-| M20 Clipboard manager | Planned |
-| M21 System mixer panel | Planned |
-| M22 Screenshot tool | Planned |
-| M23 Persistence and theming | Planned |
-| M24 Plugin API for widgets | Planned |
-| M25 Files app | Planned |
-| M26 Full shell replacement | Option, not a requirement |
+<iframe
+  src="https://basalt-lancer-b02.notion.site/0a5506f72fd540acaa0a0123c9c29d80?v=3ffd677f1c2f817bb34f000ced4524cd"
+  width="100%" height="620" frameborder="0"
+  style="border-radius:10px"
+  title="NovaBar Roadmap"
+></iframe>
+
+The board above is the source of truth and is grouped by Status. The
+**Labels** on each milestone are the cross-cutting themes that appear on more than one
+of them. The notes that follow explain the ones where the reasoning is not obvious from
+the title.
 
 ### M8 — Keyboard window management
 

@@ -50,7 +50,12 @@ removes the safety net and leaves a stale work area behind.
 | M14 Full shell replacement | An **option, not a requirement**. |
 
 The README carries the same table with a section per milestone describing what each one
-means.
+means, and embeds the Notion board as a live iframe. That board is the source of truth:
+<https://basalt-lancer-b02.notion.site/0a5506f72fd540acaa0a0123c9c29d80?v=3ffd677f1c2f817bb34f000ced4524cd>
+
+**Labels** on each milestone are the cross-cutting themes, the ones that appear on more
+than one milestone, so a question like "which milestones touch the widget platform?" is
+one filter away.
 
 ### Shipped features
 

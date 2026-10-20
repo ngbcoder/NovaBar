@@ -120,6 +120,16 @@ func ParseHotkeySpec(spec string) (HotkeyBinding, error) {
 	}
 
 	if !keySeen {
+		// The Windows key on its own is bindable, and is the one bare modifier worth
+		// binding: Windows does not claim it, and an app menu that opens on the key the
+		// user already expects is the whole point.
+		//
+		// The other modifiers stay refused. A bare Ctrl or Shift hotkey would swallow
+		// ordinary shortcuts such as Ctrl+C and Ctrl+Shift+I, which is a far worse
+		// trade than not having the binding.
+		if modifiers == MOD_WIN {
+			return HotkeyBinding{Modifiers: MOD_WIN | MOD_NOREPEAT, VK: VK_LWIN, Spec: trimmed}, nil
+		}
 		return HotkeyBinding{}, fmt.Errorf("hotkey %q names modifiers but no key", spec)
 	}
 	if modifiers == 0 {

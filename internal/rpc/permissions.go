@@ -102,9 +102,9 @@ var methodPermissions = map[string]string{
 	MethodVolumeSet:       PermAudioControl,
 	MethodVolumeMute:      PermAudioControl,
 	MethodConfigGet:       PermConfigRead,
-	MethodConfigSchema:   PermConfigRead,
-	MethodConfigSet:      PermConfigWrite,
-	MethodHotkeyCheck:    PermConfigWrite,
+	MethodConfigSchema:    PermConfigRead,
+	MethodConfigSet:       PermConfigWrite,
+	MethodHotkeyCheck:     PermConfigWrite,
 }
 
 // MethodPermissions returns the methods that widgets may call and what each needs.

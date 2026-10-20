@@ -184,7 +184,7 @@ func createOverlayWindow(x, y, width, height int32) (windows.HWND, error) {
 	// expected when a second overlay is shown after the first was destroyed.
 	_, _ = win.RegisterClassEx(&wcx)
 
-	// WS_EX_TOOLWINDOW keeps it out of the taskbar and Alt+Tab. 
+	// WS_EX_TOOLWINDOW keeps it out of the taskbar and Alt+Tab.
 	// 0x00080000 is WS_EX_LAYERED, required to enable proper window transparency compositing.
 	exStyle := uint32(win.WS_EX_TOOLWINDOW | win.WS_EX_TOPMOST | 0x00080000)
 	style := uint32(win.WS_POPUP | win.WS_VISIBLE)
