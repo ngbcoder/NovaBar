@@ -144,6 +144,20 @@ type Placement struct {
 // windows are excluded from the layout and returned with ActionFloat/ActionIgnore so
 // the caller can apply them as a separate, cheaper step.
 func (e *Engine) Decide(subjects []WindowSubject) []Placement {
+	return e.decide(subjects, nil)
+}
+
+// zoneRequest is a zone layout for one monitor.
+type zoneRequest struct {
+	// monitor is the index of the monitor the zone applies to.
+	monitor int
+	// cell is the index of the cell the focused window takes.
+	cell int
+}
+
+// decide computes placements, optionally with one monitor's windows laid out as
+// zones rather than by the configured layout.
+func (e *Engine) decide(subjects []WindowSubject, zone *zoneRequest) []Placement {
 	e.mu.RLock()
 	cfg := e.cfg
 	rules := e.rules
@@ -201,7 +215,14 @@ func (e *Engine) Decide(subjects []WindowSubject) []Placement {
 			continue
 		}
 		workArea := monitors[monitorIdx].WorkArea
+
 		rects := e.layoutFor(workArea, len(group), gaps)
+		if zone != nil && zone.monitor == monitorIdx {
+			// The zone applies to this monitor, and the window that takes the
+			// chosen cell is the first in the group, because the caller put it
+			// there.
+			rects = LayoutZones(workArea, len(group), gaps, zone.cell)
+		}
 
 		for i, s := range group {
 			if i >= len(rects) {

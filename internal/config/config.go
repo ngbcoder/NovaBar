@@ -32,6 +32,7 @@ type Config struct {
 	Tiling  TilingConfig  `toml:"tiling"`
 	Bars    []BarConfig   `toml:"bars"`
 	Hotkeys HotkeyConfig  `toml:"hotkeys"`
+	Keymap  KeymapConfig  `toml:"keymap"`
 	Rules   []RuleConfig  `toml:"rules"`
 	Dock    DockConfig    `toml:"dock"`
 }
@@ -117,6 +118,105 @@ type HotkeyConfig struct {
 	Settings string `toml:"settings"`
 }
 
+// KeymapConfig holds the window management keymap.
+//
+// A table rather than a field per binding, because there are a lot of bindings and
+// they belong together: the four directions of three actions, and the workspaces.
+// The names are fixed and the values are hotkey specs, e.g.
+//
+//	[keymap]
+//	focus_left = 'Ctrl+Alt+H'
+//	workspace_3 = 'Alt+3'
+type KeymapConfig struct {
+	// Bindings maps an action name to its hotkey spec.
+	Bindings map[string]string `toml:"keymap"`
+}
+
+// The keymap action names.
+//
+// These are the vocabulary: a binding may use any of them and nothing else, so a
+// typo in a binding is reported rather than silently ignored.
+const (
+	// KeymapFocusLeft and friends focus the neighbouring window.
+	KeymapFocusLeft  = "focus_left"
+	KeymapFocusDown  = "focus_down"
+	KeymapFocusUp    = "focus_up"
+	KeymapFocusRight = "focus_right"
+
+	// KeymapMoveLeft and friends move the focused window into its neighbour's place.
+	KeymapMoveLeft  = "move_left"
+	KeymapMoveDown  = "move_down"
+	KeymapMoveUp    = "move_up"
+	KeymapMoveRight = "move_right"
+
+	// KeymapResize opens the zone picker for the focused window.
+	KeymapResize = "resize"
+
+	// KeymapWorkspaceN switches to workspace N, and KeymapMoveWorkspaceN moves the
+	// focused window there. N is 1 to 9.
+	KeymapWorkspace1     = "workspace_1"
+	KeymapWorkspace2     = "workspace_2"
+	KeymapWorkspace3     = "workspace_3"
+	KeymapWorkspace4     = "workspace_4"
+	KeymapWorkspace5     = "workspace_5"
+	KeymapWorkspace6     = "workspace_6"
+	KeymapWorkspace7     = "workspace_7"
+	KeymapWorkspace8     = "workspace_8"
+	KeymapWorkspace9     = "workspace_9"
+	KeymapMoveWorkspace1 = "move_workspace_1"
+	KeymapMoveWorkspace2 = "move_workspace_2"
+	KeymapMoveWorkspace3 = "move_workspace_3"
+	KeymapMoveWorkspace4 = "move_workspace_4"
+	KeymapMoveWorkspace5 = "move_workspace_5"
+	KeymapMoveWorkspace6 = "move_workspace_6"
+	KeymapMoveWorkspace7 = "move_workspace_7"
+	KeymapMoveWorkspace8 = "move_workspace_8"
+	KeymapMoveWorkspace9 = "move_workspace_9"
+)
+
+// KeymapActions lists every action name the keymap accepts.
+func KeymapActions() []string {
+	out := []string{
+		KeymapFocusLeft, KeymapFocusDown, KeymapFocusUp, KeymapFocusRight,
+		KeymapMoveLeft, KeymapMoveDown, KeymapMoveUp, KeymapMoveRight,
+		KeymapResize,
+	}
+	for n := 1; n <= 9; n++ {
+		out = append(out, fmt.Sprintf("workspace_%d", n))
+		out = append(out, fmt.Sprintf("move_workspace_%d", n))
+	}
+	return out
+}
+
+// DefaultKeymap returns the default window management bindings.
+//
+// The chords are ones Windows does not already own. The obvious candidates are taken:
+// Win+H, Win+K and Win+L are Windows' own, and so is every one of Win+1 to
+// Win+9, which switch virtual desktops. A binding that cannot be registered is a
+// binding that silently does nothing, so the defaults avoid the collisions.
+func DefaultKeymap() map[string]string {
+	out := map[string]string{
+		KeymapFocusLeft:  "Ctrl+Alt+H",
+		KeymapFocusDown:  "Ctrl+Alt+J",
+		KeymapFocusUp:    "Ctrl+Alt+K",
+		KeymapFocusRight: "Ctrl+Alt+L",
+
+		KeymapMoveLeft:  "Ctrl+Alt+Shift+H",
+		KeymapMoveDown:  "Ctrl+Alt+Shift+J",
+		KeymapMoveUp:    "Ctrl+Alt+Shift+K",
+		KeymapMoveRight: "Ctrl+Alt+Shift+L",
+
+		KeymapResize: "Ctrl+Alt+Win+R",
+	}
+
+	for n := 1; n <= 9; n++ {
+		out[fmt.Sprintf("workspace_%d", n)] = fmt.Sprintf("Alt+%d", n)
+		out[fmt.Sprintf("move_workspace_%d", n)] = fmt.Sprintf("Ctrl+Shift+%d", n)
+	}
+
+	return out
+}
+
 type RuleConfig struct {
 	Process string `toml:"process"`
 	Class   string `toml:"class"`
@@ -173,6 +273,9 @@ func DefaultConfig() Config {
 			WorkspacePrev: "Alt+Left",
 			WorkspaceNext: "Alt+Right",
 			Settings:      "Ctrl+Alt+S",
+		},
+		Keymap: KeymapConfig{
+			Bindings: DefaultKeymap(),
 		},
 		Rules: []RuleConfig{
 			{Process: "Taskmgr.exe", Action: "float"},
@@ -317,6 +420,10 @@ func Validate(cfg *Config) error {
 		return err
 	}
 
+	if err := validateKeymap(cfg); err != nil {
+		return err
+	}
+
 	// Dock bounds are clamped rather than rejected: an odd icon size is cosmetic, and
 	// refusing to start because of one would be a poor trade.
 	if cfg.Dock.Size < 28 {
@@ -360,6 +467,37 @@ var validEdges = map[string]bool{
 // The important rule is one bar per edge. The AppBar API reserves a single strip per
 // screen edge, so two bars claiming the same edge would each shrink the work area from
 // the same side and leave the user with a gap that is twice as large as either bar.
+// validateKeymap checks the window management bindings.
+//
+// An unknown action name is an error rather than something to ignore: a binding
+// named "focus_lft" does nothing at all, and the user would be left with a key
+// that does not work and no explanation.
+func validateKeymap(cfg *Config) error {
+	if len(cfg.Keymap.Bindings) == 0 {
+		cfg.Keymap.Bindings = DefaultKeymap()
+		return nil
+	}
+
+	known := make(map[string]bool, len(KeymapActions()))
+	for _, action := range KeymapActions() {
+		known[action] = true
+	}
+
+	for name, spec := range cfg.Keymap.Bindings {
+		if !known[name] {
+			return fmt.Errorf("keymap action %q is not one of %s", name, strings.Join(KeymapActions(), ", "))
+		}
+		if strings.TrimSpace(spec) == "" {
+			// An empty binding means "not bound", which is a legitimate thing to
+			// want, so it is dropped rather than rejected.
+			delete(cfg.Keymap.Bindings, name)
+			continue
+		}
+	}
+
+	return nil
+}
+
 func validateBars(bars []BarConfig) error {
 	seen := make(map[string]int, len(bars))
 

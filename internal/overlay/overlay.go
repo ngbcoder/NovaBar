@@ -63,6 +63,11 @@ type Options struct {
 	// Persistent keeps the window alive when the page posts the dismiss sentinel. The
 	// dock is always present; it is not something the user opened.
 	Persistent bool
+	// Rect places the window at an exact rectangle, in virtual screen coordinates.
+	//
+	// The zone picker needs this: its grid has to line up with the work area it is
+	// drawn over, so it cannot be centred or anchored like an ordinary overlay.
+	Rect *win.RECT
 }
 
 // Overlay is a transient popup surface.
@@ -136,6 +141,15 @@ func Show(opts Options) (*Overlay, error) {
 		}
 		x = screen.Left + (screenW-opts.Width)/2
 		y = screen.Bottom - opts.Height - opts.BottomMargin
+	}
+
+	// An exact rectangle wins over everything else: it is the only way to put the
+	// window somewhere the content inside it has to line up with.
+	if opts.Rect != nil {
+		x = opts.Rect.Left
+		y = opts.Rect.Top
+		opts.Width = opts.Rect.Width()
+		opts.Height = opts.Rect.Height()
 	}
 
 	hwnd, err := createOverlayWindow(x, y, opts.Width, opts.Height)

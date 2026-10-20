@@ -1,0 +1,13 @@
+{
+  "id": "novabar.zones",
+  "name": "NovaBar Zone Picker",
+  "version": "0.1.0",
+  "entry": "index.html",
+  "permissions": [
+    "windows.read"
+  ],
+  "window": {
+    "kind": "overlay",
+    "transparent": true
+  }
+}

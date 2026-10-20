@@ -1,0 +1,88 @@
+/*
+ * The zone picker.
+ *
+ * A grid over the work area. The user picks a cell, the focused window takes it,
+ * and the other windows fill what is left.
+ *
+ * The grid is drawn over the whole surface rather than as a panel in the middle:
+ * the point is to choose a piece of the screen, so the pieces of the screen have to
+ * be where the screen is.
+ */
+
+:root {
+  --cell: rgba(46, 230, 168, 0.16);
+  --cell-hover: rgba(46, 230, 168, 0.3);
+  --edge: rgba(46, 230, 168, 0.55);
+  --label: rgba(242, 244, 248, 0.85);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+  font: 12px/1.2 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+}
+
+.cell {
+  position: relative;
+  border: 1px dashed var(--edge);
+  border-radius: 10px;
+  background: var(--cell);
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.cell:hover {
+  background: var(--cell-hover);
+  border-style: solid;
+  transform: scale(0.99);
+}
+
+/* The window that is being moved, so the user can see what they are moving. */
+.cell.held {
+  background: rgba(46, 230, 168, 0.34);
+  border-color: var(--edge);
+  border-style: solid;
+}
+
+.cell .label {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--label);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 6px;
+  text-align: center;
+  color: var(--label);
+  font-size: 11px;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cell { transition: none; }
+}

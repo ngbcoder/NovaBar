@@ -18,7 +18,7 @@ size = 40
 enabled = true
 name = 'main'
 widget = 'bar'
-transparent = false
+transparent = false w
 
 [hotkeys]
 rescue = 'Ctrl+Alt+Shift+R'

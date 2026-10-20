@@ -99,6 +99,12 @@ type daemon struct {
 	dock       *overlay.Overlay
 	dockSecret string
 
+	// zones is the zone picker waiting for the user to pick a cell, if any.
+	zones *zonePicker
+	// zoneOverlay is the picker surface, and zoneSecret its credential.
+	zoneOverlay *overlay.Overlay
+	zoneSecret  string
+
 	trk      *tracker.WindowTracker
 	engine   *tiling.Engine
 	spaces   *workspace.Manager
@@ -777,6 +783,19 @@ const pumpTaskTimeout = 5 * time.Second
 // been applied before it carries on, and returning early would let two changes
 // overlap and leave the bars in a state neither of them intended.
 func (d *daemon) onPumpThread(fn func()) {
+	// Already on the pump thread: run the work here.
+	//
+	// This is not an optimisation. WebView2 delivers a page's messages on the
+	// thread that created the controller, which is the pump thread, so a widget
+	// that asks for something to happen on the pump thread is already on it.
+	// Queuing the work and waiting for it would be waiting for this thread to
+	// pick up a job this thread is supposed to be running: the pump would block
+	// on itself and no message would be handled again.
+	if windows.GetCurrentThreadId() == d.pumpThread {
+		fn()
+		return
+	}
+
 	if d.pumpTasks == nil {
 		fn()
 		return
@@ -847,13 +866,13 @@ func (d *daemon) pump() {
 
 // handleHotkey dispatches a WM_HOTKEY.
 func (d *daemon) handleHotkey(id uintptr) {
-	action, ok := d.hotkeys.Resolve(id)
+	binding, ok := d.hotkeys.Resolve(id)
 	if !ok {
 		return
 	}
-	log.Printf("[NovaBar] Hotkey: %s\n", action)
+	log.Printf("[NovaBar] Hotkey: %s\n", binding)
 
-	switch action {
+	switch binding.Action {
 	case hotkey.ActionRescue:
 		log.Println("[NovaBar] Rescue hotkey pressed; restoring the desktop")
 		d.performRescue()
@@ -867,7 +886,305 @@ func (d *daemon) handleHotkey(id uintptr) {
 	case hotkey.ActionWorkspaceNext:
 		d.spaces.Step(1)
 		d.afterWorkspaceChange()
+	case hotkey.ActionFocus:
+		d.focusInDirection(binding.Direction)
+	case hotkey.ActionMove:
+		d.moveInDirection(binding.Direction)
+	case hotkey.ActionResize:
+		d.openZonePicker()
+	case hotkey.ActionWorkspace:
+		d.spaces.Switch(binding.Workspace)
+		d.afterWorkspaceChange()
+	case hotkey.ActionMoveToWorkspace:
+		d.moveFocusedToWorkspace(binding.Workspace)
 	}
+}
+
+// zonePicker is a zone grid waiting for the user to pick a cell.
+type zonePicker struct {
+	focused windows.HWND
+	cells   int
+}
+
+// openZonePicker opens the zone picker for the focused window.
+//
+// The picker is a grid over the work area: the user picks a cell, the focused window
+// takes it, and the other tiled windows fill what is left.
+func (d *daemon) openZonePicker() {
+	if d.zoneOverlay != nil {
+		d.closeZonePicker()
+		return
+	}
+
+	focused, ok := d.focusedWindow()
+	if !ok {
+		return
+	}
+
+	subjects := d.tilingSubjects()
+	if len(subjects) < 2 {
+		// A single window has nothing to be arranged around, so there is nothing
+		// to pick.
+		return
+	}
+
+	// The window being moved goes first, so the cell the user picks belongs to it.
+	subjects = moveToFront(subjects, focused)
+	if subjects[0].HWnd != focused {
+		return
+	}
+
+	workArea, ok := d.workAreaFor(focused)
+	if !ok {
+		return
+	}
+
+	cells := tiling.ZoneCells(len(subjects))
+
+	secret, err := randomSecret()
+	if err != nil {
+		log.Printf("[NovaBar] Could not create a zone picker credential: %v\n", err)
+		return
+	}
+	if err := d.rpcs.RegisterWidget(secret, "zones", d.widgetPermissions("zones")); err != nil {
+		log.Printf("[NovaBar] Zone picker credential rejected: %v\n", err)
+		return
+	}
+
+	boot := webview.Bootstrap{
+		Port:        d.rpcs.Port(),
+		Token:       d.rpcs.Token(),
+		WidgetToken: secret,
+		Widget:      "zones",
+		Permissions: d.widgetPermissions("zones"),
+		Data: map[string]any{
+			"cells": cells,
+			"held":  0,
+			"title": d.windowTitle(focused),
+		},
+	}
+	js, err := boot.BootstrapJS()
+	if err != nil {
+		d.rpcs.RevokeWidget(secret)
+		log.Printf("[NovaBar] Could not build the zone picker bootstrap: %v\n", err)
+		return
+	}
+
+	ov, err := overlay.Show(overlay.Options{
+		Widget:      "zones",
+		Rect:        &workArea,
+		Transparent: true,
+		Persistent:  true,
+		OnMessage: func(payload string) {
+			d.handleZoneMessage(payload)
+		},
+	})
+	if err != nil {
+		d.rpcs.RevokeWidget(secret)
+		log.Printf("[NovaBar] Could not show the zone picker: %v\n", err)
+		return
+	}
+
+	ov.SetBootstrap(js)
+	ov.Navigate(webview.WidgetURL(d.rpcs.Port(), "zones"))
+
+	d.zoneOverlay = ov
+	d.zoneSecret = secret
+	d.zones = &zonePicker{focused: focused, cells: cells}
+
+	log.Printf("[NovaBar] Zone picker: %d cells over %dx%d\n", cells, workArea.Width(), workArea.Height())
+}
+
+// windowTitle returns the title of a window, for the picker to show.
+func (d *daemon) windowTitle(hwnd windows.HWND) string {
+	wi, ok := d.trk.Get(hwnd)
+	if !ok {
+		return ""
+	}
+	return wi.Title
+}
+
+// handleZoneMessage acts on what the picker reports.
+func (d *daemon) handleZoneMessage(payload string) {
+	var msg struct {
+		Type string `json:"type"`
+		Cell int    `json:"cell"`
+	}
+	if err := json.Unmarshal([]byte(payload), &msg); err != nil {
+		return
+	}
+
+	switch msg.Type {
+	case "zone":
+		d.applyZone(msg.Cell)
+	case "zone-cancel":
+		d.closeZonePicker()
+	}
+}
+
+// applyZone gives the focused window the chosen zone and lays the rest out around it.
+func (d *daemon) applyZone(cell int) {
+	if d.zones == nil {
+		return
+	}
+
+	subjects := d.tilingSubjects()
+	subjects = moveToFront(subjects, d.zones.focused)
+	if len(subjects) == 0 || subjects[0].HWnd != d.zones.focused {
+		d.closeZonePicker()
+		return
+	}
+
+	d.engine.ApplyZone(subjects, cell)
+	d.closeZonePicker()
+}
+
+// closeZonePicker dismisses the picker.
+func (d *daemon) closeZonePicker() {
+	if d.zoneOverlay != nil {
+		d.zoneOverlay.Close()
+		d.zoneOverlay = nil
+	}
+	if d.zoneSecret != "" && d.rpcs != nil {
+		d.rpcs.RevokeWidget(d.zoneSecret)
+	}
+	d.zoneSecret = ""
+	d.zones = nil
+}
+
+// workAreaFor returns the work area of the display a window is on.
+func (d *daemon) workAreaFor(hwnd windows.HWND) (win.RECT, bool) {
+	monitors := d.engine.GetMonitors()
+	if len(monitors) == 0 {
+		return win.RECT{}, false
+	}
+
+	hMon := win.MonitorFromWindow(hwnd, win.MONITOR_DEFAULTTONEAREST)
+	for _, m := range monitors {
+		if m.HMonitor == hMon {
+			return win.RECT{
+				Left:   int32(m.WorkArea.X),
+				Top:    int32(m.WorkArea.Y),
+				Right:  int32(m.WorkArea.X + m.WorkArea.Width),
+				Bottom: int32(m.WorkArea.Y + m.WorkArea.Height),
+			}, true
+		}
+	}
+	return win.RECT{}, false
+}
+
+// moveToFront puts a window at the head of a list, keeping the order of the rest.
+func moveToFront(subjects []tiling.WindowSubject, hwnd windows.HWND) []tiling.WindowSubject {
+	for i, s := range subjects {
+		if s.HWnd != hwnd {
+			continue
+		}
+		out := make([]tiling.WindowSubject, 0, len(subjects))
+		out = append(out, s)
+		out = append(out, subjects[:i]...)
+		out = append(out, subjects[i+1:]...)
+		return out
+	}
+	return subjects
+}
+
+// zoneCellCount returns the number of cells in the zone grid for a set of windows.
+//
+// The grid holds the windows, so a picker full of empty cells would be a picker
+// full of choices that lead nowhere.
+func zoneCellCount(windows int) int {
+	return tiling.ZoneCells(windows)
+}
+
+func (d *daemon) focusInDirection(dir string) {
+	from, ok := d.focusedWindow()
+	if !ok {
+		log.Printf("[NovaBar] Nothing is focused, so there is nothing to focus %s\n", dir)
+		return
+	}
+
+	target, ok := d.engine.FocusInDirection(d.tilingSubjects(), from, tiling.Direction(dir))
+	if !ok {
+		log.Printf("[NovaBar] No window %s of the focused one\n", dir)
+		return
+	}
+	d.focusWindow(target)
+	log.Printf("[NovaBar] Focused the window %s\n", dir)
+}
+
+// moveInDirection moves the focused window into its neighbour's place.
+func (d *daemon) moveInDirection(dir string) {
+	focused, ok := d.focusedWindow()
+	if !ok {
+		return
+	}
+	d.engine.MoveInDirection(d.tilingSubjects(), focused, tiling.Direction(dir))
+}
+
+// moveFocusedToWorkspace moves the focused window to another workspace.
+func (d *daemon) moveFocusedToWorkspace(id int) {
+	hwnd, ok := d.focusedWindow()
+	if !ok {
+		return
+	}
+	d.spaces.Move(hwnd, id)
+	d.afterWorkspaceChange()
+}
+
+// focusedWindow returns the window the shell should act on.
+//
+// The foreground window is the one the user was last using, which is what "the
+// focused window" means to someone pressing a key.
+//
+// The shell's own surfaces are not candidates. Pressing a window key while the
+// launcher is open should not move the launcher.
+func (d *daemon) focusedWindow() (windows.HWND, bool) {
+	hwnd := win.GetForegroundWindow()
+	if hwnd == 0 {
+		return 0, false
+	}
+	if !d.trk.IsManageable(hwnd) {
+		return 0, false
+	}
+	if !d.spaces.Has(hwnd) {
+		return 0, false
+	}
+	return hwnd, true
+}
+
+// focusWindow brings a window to the front.
+//
+// Windows refuses to change the foreground from a background process, and a hotkey
+// handler is one. The shell's own thread received the key, so it is usually allowed
+// to; the retry is for the case where it is not.
+func (d *daemon) focusWindow(hwnd windows.HWND) {
+	win.ShowWindow(hwnd, win.SW_SHOW)
+	if !win.SetForegroundWindow(hwnd) {
+		win.ShowWindow(hwnd, win.SW_SHOW)
+	}
+}
+
+// tilingSubjects returns the windows the tiling engine should lay out.
+func (d *daemon) tilingSubjects() []tiling.WindowSubject {
+	visible := d.spaces.VisibleWindows()
+	if len(visible) == 0 {
+		return nil
+	}
+
+	subjects := make([]tiling.WindowSubject, 0, len(visible))
+	for _, hwnd := range visible {
+		wi, ok := d.trk.Get(hwnd)
+		if !ok {
+			continue
+		}
+		subjects = append(subjects, tiling.WindowSubject{
+			HWnd:     hwnd,
+			ProcName: wi.ProcName,
+			Title:    wi.Title,
+			Class:    wi.ClassName,
+		})
+	}
+	return subjects
 }
 
 // toggleLauncher shows the launcher overlay, or dismisses it if already showing.
@@ -1353,21 +1670,7 @@ func (d *daemon) retile() {
 		return
 	}
 
-	subjects := make([]tiling.WindowSubject, 0, len(visible))
-	for _, hwnd := range visible {
-		wi, ok := d.trk.Get(hwnd)
-		if !ok {
-			continue
-		}
-		subjects = append(subjects, tiling.WindowSubject{
-			HWnd:     hwnd,
-			ProcName: wi.ProcName,
-			Title:    wi.Title,
-			Class:    wi.ClassName,
-		})
-	}
-
-	d.engine.TileSubjects(subjects)
+	d.engine.TileSubjects(d.tilingSubjects())
 }
 
 // afterWorkspaceChange retiles and announces the new workspace.

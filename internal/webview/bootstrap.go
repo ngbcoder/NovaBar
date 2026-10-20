@@ -27,6 +27,12 @@ type Bootstrap struct {
 	// decide what to offer, but it grants nothing: the daemon enforces permissions
 	// server side.
 	Permissions []string `json:"permissions"`
+	// Data is anything else the surface needs to know before it starts.
+	//
+	// The zone picker needs the shape of its grid, and it needs it before it draws
+	// anything: the grid it draws has to be the grid the layout will use, and a
+	// message sent after the page has loaded is a message that can be missed.
+	Data map[string]any `json:"data,omitempty"`
 }
 
 // PayloadJSON encodes the bootstrap as JSON.
