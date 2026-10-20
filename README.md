@@ -268,18 +268,20 @@ away on the board.
 <!-- ROADMAP:BEGIN -->
 | Milestone | State | Labels |
 | --- | --- | --- |
+| Bug — Icons have a black border and are low quality | Next | `core`, `ui` |
+|  | — | — |
 | M1 — Win32 core, safety foundations | Done | `core`, `win32`, `safety` |
 | M2 — Pure-function tiling engine | Done | `core`, `tiling` |
 | M3 — AppBar, workspaces, taskbar management | Done | `win32`, `shell` |
 | M4 — WebView2 UI, widget platform | Done | `ui`, `widgets` |
-| M5 — App launcher, GSMTC media | Done | `shell`, `ui` |
+| M5 — App launcher, GSMTC media | Done | `shell`, `ui`, `win32` |
 | M6 — Settings menu | Done | `ui`, `widgets`, `safety` |
 | M7 — Per-app volume | Done | `audio`, `win32` |
 | M8 — Keyboard window management | Next | `core`, `power-user`, `ui` |
-| M9 — Multi-monitor correctness | Planned | `win32`, `multi-monitor` |
+| M9 — Multi-monitor correctness | Next | `win32`, `multi-monitor` |
 | M10 — HiDPI and per-monitor scaling | Planned | `multi-monitor`, `accessibility`, `ui` |
 | M11 — Accessibility | Planned | `accessibility`, `ui` |
-| M12 — GSMTC media reads | Done | `media`, `winrt` |
+| M12 — GSMTC media reads | Done | `media`, `winrt`, `win32` |
 | M13 — App menu: grid, jump lists, recent files | Planned | `shell`, `ui` |
 | M14 — Global file search | Planned | `search`, `ui` |
 | M15 — Command palette | Planned | `power-user`, `ui` |
