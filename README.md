@@ -259,72 +259,188 @@ sdk.subscribe("windows.updated", onWindows);
 | M1 Win32 core, safety foundations | Done |
 | M2 Pure-function tiling engine | Done |
 | M3 AppBar, workspaces, taskbar management | Done (multi-bar, multi-edge) |
-| M4 WebView2 UI, widget platform | Done (bar, dock, launcher, manifest permissions) |
-| M5 App launcher, GSMTC media | Partial (launcher done; media activation done, session reads not) |
-| M6 Settings menu | Not started - see [Planned: settings menu](#planned-settings-menu) |
+| M4 WebView2 UI, widget platform | Done (bar, dock, launcher, settings widgets, manifest permissions) |
+| M5 App launcher, GSMTC media | Partial — launcher done, GSMTC activation done, session reads moved to M12 |
+| M6 Settings menu | Done — `Ctrl+Alt+S`, controls generated from the config schema |
 | M7 Per-app volume | Done (Core Audio sessions, dock wheel, `audio.read`/`audio.control`) |
+| M8 Keyboard window management | **Next** — the biggest product gap |
+| M9 Multi-monitor correctness | Planned — a bug, and it blocks real use |
+| M10 HiDPI and per-monitor scaling | Planned |
+| M11 Accessibility | Planned |
+| M12 GSMTC media reads | Planned — finishes M5 |
+| M13 App menu: grid, jump lists, recent files | Planned |
+| M14 Global file search | Planned |
+| M15 Command palette | Planned |
+| M16 Window previews and groups | Planned |
+| M17 Layout presets | Planned |
+| M18 Per-app window memory | Planned |
+| M19 Notifications | Planned |
+| M20 Clipboard manager | Planned |
+| M21 System mixer panel | Planned |
+| M22 Screenshot tool | Planned |
+| M23 Persistence and theming | Planned |
+| M24 Plugin API for widgets | Planned |
+| M25 Files app | Planned |
+| M26 Full shell replacement | Option, not a requirement |
 
-### Open risk: COM dependencies vs. the no-cgo constraint — **resolved twice**
+### M8 — Keyboard window management
 
-Two things in this project need COM: WebView2's `ICoreWebView2`, and the WinRT GSMTC
-session manager. Both looked blocked, on the same reasoning — `go-ole` needs cgo.
+**The tiling engine works, and there is no way to drive it.** The only hotkeys are
+rescue, launcher, settings and the two workspace steps. You cannot focus a window in a
+direction, move one, resize one, or move one to another workspace.
 
-**It does not.** `github.com/go-ole/go-ole@v1.3.0` contains no `import "C"`, no `.c`,
-`.h` or `.syso` files, and loads `combase.dll` through `x/sys/windows` the same way the
-rest of this tree does. It builds with `CGO_ENABLED=0`, which `build.ps1 verify`
-asserts for the whole tree. Older go-ole releases did require cgo, which is probably
-where the belief comes from.
+Planned, all from a configurable keymap:
 
-For WebView2, the library in use is `github.com/wailsapp/go-webview2`, also pure Go. Its
-only dependencies are a DLL loader and `x/sys`.
-
-What actually cost the old NovaBar its no-cgo constraint was **Wails v3**, which
-requires cgo. Its `feat/m1-keep-awake` branch had already begun migrating to
-`jchv/go-webview2` when it stopped. Wails was the problem, not WebView2 — worth
-remembering before reaching for a framework.
-
-The reason this is worth stating at length: the tempting move when a COM dependency
-seems to need cgo is to relax the constraint, and relaxing a safety property is much
-harder to undo than adding a dependency. Checking was cheaper than the trade-off.
-
-Hosting WebView2 inside the AppBar window `internal/bar` already owns keeps the
-work-area reservation logic where it is and confines the new dependency to one package.
-That requires an entry point which attaches to an **existing HWND**, and it is worth
-being precise about which one, because the obvious candidate does not do it:
-
-- `jchv/go-webview2` exposes `Create(debug bool, window unsafe.Pointer)` and its
-  signature suggests it attaches. It **discards its `window` argument**. Its
-  `pkg/edge` also hardcodes a null `environmentOptions` at `chromium.go:87`, so
-  Chromium command-line arguments cannot be passed at all.
-- `wailsapp/go-webview2` is what actually ships. It attaches to an existing HWND and has
-  `WithAdditionalBrowserArguments`, which is what makes the timer-throttling fix
-  possible.
-
-Without `--disable-background-timer-throttling` a never-focused bar has its timers
-throttled to roughly one tick per second, so losing those arguments is not cosmetic.
-
-See [docs/webview2-m4-findings.md](docs/webview2-m4-findings.md) for the verification
-steps and for what `ngbcoder/SeelenNovaBar` does that is worth copying — window flags,
-the Chromium arguments a desktop bar *must* pass, and why the transparency approach is
-CSS rather than Win32 hit-testing.
-
-## Planned: settings menu (M6)
-
-Not started. Config is TOML on disk today, which suits a power user and is hostile to
-everyone else: no way to discover the available options, no validation feedback, and
-enabling a second bar means reading the docs.
-
-An in-shell settings overlay, same shape as the launcher: a plain topmost window, no
-work-area reservation, dismissed with the same sentinel.
-
-| Piece | Notes |
+| Keys | Action |
 | --- | --- |
-| Schema introspection | Expose the config schema over RPC so the UI is generated from it. Already partly needed: widget manifests drift from the code that validates them. |
-| Typed editing | `config.get` returns the whole document but there is no setter. Needs one, validated server-side, keeping the "inert on error" rule from startup. |
-| First toggles | bar enable/edge/size, tiling enabled/layout/gaps, hide taskbar, hotkeys. |
-| Hotkey capture | The one thing a text field cannot do. Needs a `RegisterHotKey` conflict check at capture time, which the daemon can do cheaply. |
-| Apply without restart | Live reload already covers bar add/remove/edge and taskbar visibility. Layout and gaps do not yet re-tile on change. |
-| Safety | Editing `hide_taskbar` and the rescue hotkey edits the things that protect you. Those two should require the rescue path to already be working. |
+| `Win+H` `J` `K` `L` | Focus the window to the left, down, up, right |
+| `Win+Shift+H` `J` `K` `L` | Move the focused window |
+| `Win+Ctrl+H` `J` `K` `L` | Resize the focused window |
+| `Win+1`…`Win+9` | Jump to a workspace |
+| `Win+Shift+1`…`9` | Move the focused window to a workspace |
+
+Focus and move are the same operation in most tiling window managers, distinguished only
+by intent, so they are worth doing together.
+
+### M9 — Multi-monitor correctness
+
+Bar geometry uses `GetSystemMetrics`, which reports the **primary display only**, rather
+than `MONITORINFO` per monitor. A window dragged to a second screen lands in the wrong
+place, and per-monitor work areas are not honoured.
+
+A bug rather than a feature, and it blocks any real multi-monitor use, which is why it is
+a milestone of its own rather than a footnote.
+
+### M10 — HiDPI and per-monitor scaling
+
+Per-monitor DPI awareness, so a bar and dock on a mixed-DPI setup are crisp rather than
+blurry. The WebView2 surfaces are not DPI-aware everywhere today.
+
+Early rather than late, because every surface added afterwards inherits whatever
+scaling behaviour exists at the time. Retrofitting it means re-testing every widget.
+
+### M11 — Accessibility
+
+Screen reader support for the widgets, high contrast, and full keyboard navigation. A
+shell that owns the taskbar owns accessibility too, and Windows will not read our bar for
+us.
+
+Also early for the same reason as M10: an interface built without accessibility in mind
+is an interface that has to be rebuilt.
+
+### M12 — GSMTC media reads
+
+Finishes M5. Activation works; reading a session does not. The remaining work is one
+identifier — the IID of the statics interface — followed by a chain of hand-written vtable
+calls.
+
+`docs/gsmtc-m5-findings.md` has every slot, the two bugs that cost the most time, and
+where to get the IID. The obstacle is that a wrong vtable signature terminates the process
+rather than returning an error, so each step has to be verified before the next is
+attempted.
+
+### M13 — App menu: grid, jump lists, recent files
+
+The launcher already searches applications and windows, but it presents as a search box.
+This makes it a menu: a grid of all applications, recent files, and per-application jump
+lists.
+
+The Windows key opens it. The bare Windows key is bindable — measured on Windows 11,
+`RegisterHotKey` for `Win` alone succeeds while `Ctrl+Esc` and `Win+Space` are both
+already taken.
+
+### M14 — Global file search
+
+Index files as well as applications, so the app menu can find a document and open it with
+its default handler.
+
+### M15 — Command palette
+
+Type a few letters and run any command, switch workspace, or open anything. Faster than
+the app menu for someone who already knows what they want, and the natural home for
+commands contributed by third-party widgets (M24).
+
+### M16 — Window previews and groups
+
+Hovering a window in the bar shows a live thumbnail, and clicking a group restores that
+stack — the thing Windows 11's taskbar does well, and a tiling shell can do better
+because it knows the grouping.
+
+### M17 — Layout presets
+
+Named layouts the user can apply to the current workspace: split, stack, tabbed, monocle,
+float. The engine can already produce these; what is missing is a way to pick one.
+
+### M18 — Per-app window memory
+
+Each application reopens where you last left it, and each workspace keeps its own layout.
+Part of M23, but the per-application part is a distinct idea.
+
+### M19 — Notifications
+
+Own the notification area: toast history, per-application grouping, do-not-disturb. A
+shell that owns the taskbar and the dock but not the notifications still has the Windows
+shell showing through.
+
+### M20 — Clipboard manager
+
+A searchable clipboard history. Small, self-contained, and one of the few features people
+notice every day.
+
+### M21 — System mixer panel
+
+Master volume, per-application volume and input/output device selection. M7 gives
+per-application volume; this makes it visible and adds device switching.
+
+### M22 — Screenshot tool
+
+A screenshot tool bound to a key, saving straight to a folder. Small, and it belongs to a
+desktop shell.
+
+### M23 — Persistence and theming
+
+Restore windows, their workspace and the layout after a reboot, plus light and dark
+themes and an accent colour. Makes the shell feel like a machine you own rather than one
+you reconfigure.
+
+### M24 — Plugin API for widgets
+
+Let third-party widgets add commands, panels and keybindings. The M4 widget platform
+already isolates everything behind manifest permissions, so this is mostly a matter of
+exposing more surface. Commands land in the command palette (M15).
+
+### M25 — Files app
+
+A file manager. It comes **before** replacing Explorer, because it is useful on its own
+and does not require taking over the shell to be worth having.
+
+### M26 — Full shell replacement
+
+**An option, not a requirement.** Replacing Explorer means desktop icons, context menus
+and the recycle bin on top of the file manager from M25. It is the most ambitious item
+here and the only one that means truly owning the desktop: a long tail of shell internals,
+and weeks of work.
+
+Everything above it is worth doing whether or not this ever happens.
+## Settings menu (M6)
+
+Shipped. Opens with `Ctrl+Alt+S`, an in-shell overlay with the same shape as the
+launcher: a plain topmost window, no work-area reservation, dismissed with the same
+sentinel.
+
+What it does, and how:
+
+| Piece | How it was done |
+| --- | --- |
+| Schema introspection | `internal/config.Schema` declares every editable setting with a getter and a setter. The UI is **generated** from it, so a control cannot exist that the daemon would refuse, and a field cannot be added without appearing. |
+| Typed editing | `config.set` applies one field and revalidates the whole document, so a bad edit is refused with a reason rather than persisted and failing at the next launch. |
+| First toggles | Bar enable and size for all four edges, tiling enabled, layout and gaps, the dock, every hotkey, log level, and the taskbar. |
+| Hotkey capture | The one thing a text field cannot do. The daemon checks the chord with the same parser `Register` uses, so the page cannot accept a combination that then silently fails to bind. |
+| Apply without restart | Changes take effect immediately. The one gap: layout and gap changes do not re-tile windows that are already open. |
+| Safety | `hide_taskbar` and the rescue hotkey are marked `SafetyProtect`. The daemon refuses them while the rescue path is not working, because those are the settings that get the user out. |
 
 Not planned: a settings daemon, a background service, or any config persisted outside
 `%APPDATA%\NovaBar\config.toml`.
+
+**Rules are deliberately not editable here.** They are a list of records with compound
+matching and do not fit a generated form, so editing them stays a `config.toml` job.
