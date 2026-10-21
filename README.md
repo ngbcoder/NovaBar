@@ -268,7 +268,7 @@ away on the board.
 <!-- ROADMAP:BEGIN -->
 | Milestone | State | Labels |
 | --- | --- | --- |
-| Bug — Icons have a black border and are low quality | Next | `core`, `ui` |
+| Bug — Icons have a black border and are low quality | Done | `core`, `ui` |
 |  | — | — |
 | M1 — Win32 core, safety foundations | Done | `core`, `win32`, `safety` |
 | M2 — Pure-function tiling engine | Done | `core`, `tiling` |
@@ -277,8 +277,8 @@ away on the board.
 | M5 — App launcher, GSMTC media | Done | `shell`, `ui`, `win32` |
 | M6 — Settings menu | Done | `ui`, `widgets`, `safety` |
 | M7 — Per-app volume | Done | `audio`, `win32` |
-| M8 — Keyboard window management | Next | `core`, `power-user`, `ui` |
-| M9 — Multi-monitor correctness | Next | `win32`, `multi-monitor` |
+| M8 — Keyboard window management | In Progress | `core`, `power-user`, `ui` |
+| M9 — Multi-monitor correctness | In Progress | `win32`, `multi-monitor` |
 | M10 — HiDPI and per-monitor scaling | Planned | `multi-monitor`, `accessibility`, `ui` |
 | M11 — Accessibility | Planned | `accessibility`, `ui` |
 | M12 — GSMTC media reads | Done | `media`, `winrt`, `win32` |
@@ -288,15 +288,16 @@ away on the board.
 | M16 — Window previews and groups | Planned | `ui`, `shell` |
 | M17 — Layout presets | Planned | `tiling`, `ui` |
 | M18 — Per-app window memory | Planned | `persistence`, `ui` |
-| M19 — Notifications | Planned | `shell`, `notifications` |
+| M19 — Notifications | Next | `shell`, `notifications`, `DynamicIsland` |
 | M20 — Clipboard manager | Planned | `clipboard`, `power-user` |
-| M21 — System mixer panel | Planned | `audio`, `ui` |
+| M21 — System mixer panel | Next | `audio`, `ui`, `DynamicIsland` |
 | M22 — Screenshot tool | Planned | `power-user`, `ui` |
 | M23 — Persistence and theming | Planned | `persistence`, `ui` |
 | M24 — Plugin API for widgets | Planned | `widgets`, `plugin` |
 | M25 — Files app | Planned | `explorer`, `files` |
-| M26 - Dynamic Island | Planned | `ui`, `widgets`, `power-user`, `media`, `plugin` |
+| M26 - Dynamic Island | Next | `ui`, `widgets`, `power-user`, `media`, `plugin`, `DynamicIsland` |
 | M27 — Full shell replacement | Option | `explorer`, `windows-shell` |
+| M28 — Spotify Integration | Planned | `audio`, `widgets`, `media` |
 <!-- ROADMAP:END -->
 
 The notes that follow explain the milestones where the reasoning is not obvious from the
