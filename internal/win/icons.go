@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -62,13 +63,45 @@ var (
 	procDeleteObject       = iconModGdi32.NewProc("DeleteObject")
 )
 
+// iconCache caches extracted icons by executable path so repeated calls (one per window
+// refresh, one per pin list) do not re-read the PE resources each time.
+var (
+	iconCacheMu sync.Mutex
+	iconCache   = make(map[string]iconCacheEntry)
+)
+
+type iconCacheEntry struct {
+	data string
+	err  error
+}
+
 // ExtractIconBase64 extracts the icon from an executable path and returns a Base64 PNG data URI.
+//
+// Results are cached by path, including failures, so a path that has no usable icon is
+// not retried on every refresh.
 func ExtractIconBase64(exePath string) (string, error) {
-	data, err := ExtractIconPNG(exePath)
-	if err != nil {
-		return "", err
+	if exePath == "" {
+		return "", fmt.Errorf("empty executable path")
 	}
-	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(data), nil
+
+	iconCacheMu.Lock()
+	if entry, ok := iconCache[exePath]; ok {
+		iconCacheMu.Unlock()
+		return entry.data, entry.err
+	}
+	iconCacheMu.Unlock()
+
+	data, err := ExtractIconPNG(exePath)
+	var result string
+	if err == nil {
+		result = "data:image/png;base64," + base64.StdEncoding.EncodeToString(data)
+	}
+
+	iconCacheMu.Lock()
+	iconCache[exePath] = iconCacheEntry{data: result, err: err}
+	iconCacheMu.Unlock()
+
+	return result, err
 }
 
 // ExtractIconPNG extracts the icon for an executable path and encodes it into PNG

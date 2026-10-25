@@ -319,6 +319,7 @@ function buildTiles() {
         tiles.push(makeTile({
             label: nameFor(win),
             glyph: monogram(win.proc_name || win.title),
+            icon: win.icon,
             hue: hueFor(win.proc_name || win.title),
             running: true,
             active: win.hwnd === activeHwnd,

@@ -23,6 +23,9 @@ type WindowInfo struct {
 	Rect      win.RECT     `json:"rect"`
 	IsCloaked bool         `json:"cloaked"`
 	IsVisible bool         `json:"visible"`
+	// Icon is a base64 data URI for the window's application icon, or "" when it
+	// could not be extracted. Populated during Refresh.
+	Icon string `json:"icon"`
 }
 
 // shellClasses are top-level windows that belong to the Windows shell. They must
@@ -173,6 +176,15 @@ func (t *WindowTracker) Refresh() {
 		bounds, _ := win.GetExtendedFrameBounds(hwnd)
 		procName := t.processName(pid)
 
+		// Extract the application icon for the dock. Cached by executable path so a
+		// window refresh does not re-read the PE resources every time.
+		icon := ""
+		if path := win.ProcessImagePath(pid); path != "" {
+			if data, err := win.ExtractIconBase64(path); err == nil {
+				icon = data
+			}
+		}
+
 		found[hwnd] = &WindowInfo{
 			HWnd:      hwnd,
 			PID:       pid,
@@ -181,6 +193,7 @@ func (t *WindowTracker) Refresh() {
 			ClassName: className,
 			Rect:      bounds,
 			IsVisible: true,
+			Icon:      icon,
 		}
 		return 1
 	}, 0)

@@ -290,9 +290,20 @@ func DefaultConfig() Config {
 	}
 }
 
-// GetConfigPath returns Project Root
+// GetConfigPath returns the config file location.
+//
+// The config lives under %APPDATA%\NovaBar, next to the pin store and the IPC
+// discovery file, so all three subsystems agree on where state lives.
 func GetConfigPath() (string, error) {
-	return "config.toml", nil
+	base := os.Getenv("APPDATA")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		base = filepath.Join(home, "AppData", "Roaming")
+	}
+	return filepath.Join(base, "NovaBar", "config.toml"), nil
 }
 
 // Load loads the config, creating a default file on first run.

@@ -64,14 +64,15 @@ html, body {
   backdrop-filter: blur(32px) saturate(200%) brightness(1.08);
   z-index: 2;
   transition:
-    transform 280ms var(--ease-out),
-    opacity 220ms ease;
+    transform 320ms var(--ease-out),
+    opacity 240ms ease;
   animation: dock-in 560ms var(--ease-out) both;
+  will-change: transform, opacity;
 }
 
 /* Hidden: slide below the overlay edge, keep a thin presence for the hotzone */
 #dock.hidden {
-  transform: translateX(-50%) translateY(calc(100% + 20px));
+  transform: translateX(-50%) translateY(calc(100% + 24px)) scale(0.94);
   opacity: 0;
   pointer-events: none;
   animation: none;
