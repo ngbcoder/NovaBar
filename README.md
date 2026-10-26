@@ -295,9 +295,10 @@ away on the board.
 | M23 — Persistence and theming | Planned | `persistence`, `ui` |
 | M24 — Plugin API for widgets | Planned | `widgets`, `plugin` |
 | M25 — Files app | Planned | `explorer`, `files` |
-| M26 - Dynamic Island | Next | `ui`, `widgets`, `power-user`, `media`, `plugin`, `DynamicIsland` |
+| M26 - Dynamic Island | Partial | `ui`, `widgets`, `power-user`, `media`, `plugin`, `DynamicIsland` |
 | M27 — Full shell replacement | Option | `explorer`, `windows-shell` |
-| M28 — Spotify Integration | Planned | `audio`, `widgets`, `media` |
+| M28 — Spotify Integration | Partial | `audio`, `widgets`, `media` |
+| M29 — Installer | Planned | `core`, `ui`, `safety` |
 <!-- ROADMAP:END -->
 
 The notes that follow explain the milestones where the reasoning is not obvious from the
