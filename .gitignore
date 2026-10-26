@@ -21,6 +21,10 @@ go.work
 # Logs & temp
 *.log
 tmp/
+
+# MkDocs build output
+site/
+.cache/
 # Test artifact. The config path is currently project-root-relative, so the config
 # tests write their file into the package directory instead of a temp dir. This is a
 # symptom of the config-location decision, not a wanted file. See todo.md.
