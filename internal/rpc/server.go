@@ -51,12 +51,18 @@ const (
 	MethodSpotifyPrevious = "spotify.previous"
 	MethodSpotifyConnect  = "spotify.connect"
 
-	TopicWindowsUpdated  = "windows.updated"
-	TopicWorkspaceChange = "workspace.changed"
-	TopicMediaState      = "media.state"
-	TopicSystemStats     = "system.stats"
-	TopicPinsChanged     = "pins.changed"
-	TopicAudioUpdated    = "audio.updated"
+	MethodNotificationsList    = "notifications.list"
+	MethodNotificationsDismiss = "notifications.dismiss"
+	MethodNotificationsClear   = "notifications.clear"
+	MethodNotificationsDNDSet  = "notifications.dnd.set"
+
+	TopicWindowsUpdated        = "windows.updated"
+	TopicWorkspaceChange       = "workspace.changed"
+	TopicMediaState            = "media.state"
+	TopicSystemStats           = "system.stats"
+	TopicPinsChanged           = "pins.changed"
+	TopicAudioUpdated          = "audio.updated"
+	TopicNotificationsUpdated  = "notifications.updated"
 )
 
 // ipcFileName is the descriptor written to %APPDATA%\NovaBar\ so that shellctl and

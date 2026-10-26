@@ -288,7 +288,7 @@ away on the board.
 | M16 — Window previews and groups | Planned | `ui`, `shell` |
 | M17 — Layout presets | Planned | `tiling`, `ui` |
 | M18 — Per-app window memory | Planned | `persistence`, `ui` |
-| M19 — Notifications | Next | `shell`, `notifications`, `DynamicIsland` |
+| M19 — Notifications | Done | `shell`, `notifications`, `DynamicIsland` |
 | M20 — Clipboard manager | Planned | `clipboard`, `power-user` |
 | M21 — System mixer panel | Next | `audio`, `ui`, `DynamicIsland` |
 | M22 — Screenshot tool | Planned | `power-user`, `ui` |

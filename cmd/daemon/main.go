@@ -23,6 +23,7 @@ import (
 	"github.com/ngbcoder/NovaBar/internal/hotkey"
 	"github.com/ngbcoder/NovaBar/internal/launcher"
 	"github.com/ngbcoder/NovaBar/internal/media"
+	"github.com/ngbcoder/NovaBar/internal/notifications"
 	"github.com/ngbcoder/NovaBar/internal/onboarding"
 	"github.com/ngbcoder/NovaBar/internal/overlay"
 	"github.com/ngbcoder/NovaBar/internal/pins"
@@ -115,10 +116,11 @@ type daemon struct {
 	media    *media.Controller
 	spotify  *spotify.Client
 	pinStore *pins.Store
-	audio    *volume.Controller
-	rpcs     *rpc.Server
-	hotkeys  *hotkey.Manager
-	dog      *watchdog.Watchdog
+	audio         *volume.Controller
+	notifications *notifications.Manager
+	rpcs          *rpc.Server
+	hotkeys       *hotkey.Manager
+	dog           *watchdog.Watchdog
 
 	// quit is signalled by the signal handler, which hands off to the pump thread.
 	// Win32 requires the quit to originate on the pump thread, so the signal handler
@@ -165,6 +167,7 @@ func Run() {
 		widgetSecrets: make(map[string]string, 4),
 		trk:           tracker.NewWindowTracker(),
 		spaces:        workspace.NewManager(),
+		notifications: notifications.NewManager(),
 		pumpTasks:     make(chan func(), 8),
 	}
 	// Capture the pump thread before anything can signal us, so an early Ctrl+C still
@@ -1697,6 +1700,8 @@ func (d *daemon) registerRPCMethods() {
 		// a widget needs to render bars, gaps and enabled features.
 		return d.cfg, nil
 	})
+
+	d.registerNotificationMethods()
 }
 
 // parseHWND extracts a window handle from a params object accepting "hwnd" as either a

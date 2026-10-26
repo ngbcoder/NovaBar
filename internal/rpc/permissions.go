@@ -50,6 +50,8 @@ const (
 	// geometry, the taskbar, the hotkey that gets you out. A widget that draws a
 	// diagnostics page has no business rearranging the desktop because the user opened it.
 	PermConfigWrite = "config.write"
+	// PermNotificationsManage manages notification history and DND.
+	PermNotificationsManage = "notifications.manage"
 )
 
 // AllPermissions is every permission a widget may declare, for validation.
@@ -65,6 +67,7 @@ var AllPermissions = []string{
 	PermWindowsFocus,
 	PermWindowsRead,
 	PermWorkspaceManage,
+	PermNotificationsManage,
 }
 
 // ValidPermission reports whether a declared permission is one this daemon understands.
@@ -83,35 +86,39 @@ func ValidPermission(p string) bool {
 // safe default for a new method added later is to be inaccessible until someone decides
 // what it should require, rather than to silently inherit the session token's access.
 var methodPermissions = map[string]string{
-	MethodWindowsGet:      PermWindowsRead,
-	MethodWindowFocus:     PermWindowsFocus,
-	MethodWindowMove:      PermWindowsControl,
-	MethodWindowClose:     PermWindowsControl,
-	MethodWorkspaceGet:    PermWindowsRead,
-	MethodWorkspaceSwitch: PermWorkspaceManage,
-	MethodLauncherSearch:  PermLauncherUse,
-	MethodLauncherLaunch:  PermLauncherUse,
-	MethodPinsList:        PermLauncherUse,
-	MethodPinsAdd:         PermPinsManage,
-	MethodPinsRemove:      PermPinsManage,
-	MethodPinsToggle:      PermPinsManage,
-	MethodPinsMove:        PermPinsManage,
-	MethodMediaGet:        PermWindowsRead,
-	MethodMediaCommand:    PermMediaControl,
-	MethodSpotifyStatus:   PermWindowsRead,
-	MethodSpotifyQueue:    PermWindowsRead,
-	MethodSpotifyPlay:     PermMediaControl,
-	MethodSpotifyPause:    PermMediaControl,
-	MethodSpotifyNext:     PermMediaControl,
-	MethodSpotifyPrevious: PermMediaControl,
-	MethodSpotifyConnect:  PermMediaControl,
-	MethodVolumeList:      PermAudioRead,
-	MethodVolumeSet:       PermAudioControl,
-	MethodVolumeMute:      PermAudioControl,
-	MethodConfigGet:       PermConfigRead,
-	MethodConfigSchema:    PermConfigRead,
-	MethodConfigSet:       PermConfigWrite,
-	MethodHotkeyCheck:     PermConfigWrite,
+	MethodWindowsGet:           PermWindowsRead,
+	MethodWindowFocus:          PermWindowsFocus,
+	MethodWindowMove:           PermWindowsControl,
+	MethodWindowClose:          PermWindowsControl,
+	MethodWorkspaceGet:         PermWindowsRead,
+	MethodWorkspaceSwitch:      PermWorkspaceManage,
+	MethodLauncherSearch:       PermLauncherUse,
+	MethodLauncherLaunch:       PermLauncherUse,
+	MethodPinsList:             PermLauncherUse,
+	MethodPinsAdd:              PermPinsManage,
+	MethodPinsRemove:           PermPinsManage,
+	MethodPinsToggle:           PermPinsManage,
+	MethodPinsMove:             PermPinsManage,
+	MethodMediaGet:             PermWindowsRead,
+	MethodMediaCommand:         PermMediaControl,
+	MethodSpotifyStatus:        PermWindowsRead,
+	MethodSpotifyQueue:         PermWindowsRead,
+	MethodSpotifyPlay:          PermMediaControl,
+	MethodSpotifyPause:         PermMediaControl,
+	MethodSpotifyNext:          PermMediaControl,
+	MethodSpotifyPrevious:      PermMediaControl,
+	MethodSpotifyConnect:       PermMediaControl,
+	MethodVolumeList:           PermAudioRead,
+	MethodVolumeSet:            PermAudioControl,
+	MethodVolumeMute:           PermAudioControl,
+	MethodConfigGet:            PermConfigRead,
+	MethodConfigSchema:         PermConfigRead,
+	MethodConfigSet:            PermConfigWrite,
+	MethodHotkeyCheck:          PermConfigWrite,
+	MethodNotificationsList:    PermNotificationsManage,
+	MethodNotificationsDismiss: PermNotificationsManage,
+	MethodNotificationsClear:   PermNotificationsManage,
+	MethodNotificationsDNDSet:  PermNotificationsManage,
 }
 
 // MethodPermissions returns the methods that widgets may call and what each needs.
