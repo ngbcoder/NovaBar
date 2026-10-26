@@ -1535,6 +1535,38 @@ func (d *daemon) registerRPCMethods() {
 	registerConfigMethods(r, d)
 
 	r.RegisterMethod(rpc.MethodMediaGet, func(json.RawMessage) (interface{}, error) {
+		if d.cfg.Spotify.Enabled && d.spotify != nil && d.spotify.IsConnected() {
+			if tr, err := d.spotify.CurrentTrack(context.Background()); err == nil && tr.IsPlaying {
+				return media.MediaSession{
+					AppID:       "Spotify.exe",
+					Title:       tr.Name,
+					Artist:      strings.Join(tr.Artists, ", "),
+					Album:       tr.Album,
+					Playback:    media.StatePlaying,
+					CanPlay:     true,
+					CanPause:    true,
+					CanNext:     true,
+					CanPrevious: true,
+					Source:      "spotify",
+				}, nil
+			}
+			if d.cfg.Spotify.Prefer {
+				if tr, err := d.spotify.CurrentTrack(context.Background()); err == nil {
+					return media.MediaSession{
+						AppID:       "Spotify.exe",
+						Title:       tr.Name,
+						Artist:      strings.Join(tr.Artists, ", "),
+						Album:       tr.Album,
+						Playback:    media.StatePlaying,
+						CanPlay:     true,
+						CanPause:    true,
+						CanNext:     true,
+						CanPrevious: true,
+						Source:      "spotify",
+					}, nil
+				}
+			}
+		}
 		return d.media.GetCurrentSession(), nil
 	})
 
@@ -1552,6 +1584,25 @@ func (d *daemon) registerRPCMethods() {
 		default:
 			return nil, fmt.Errorf("unknown media command %q", p.Command)
 		}
+
+		if d.cfg.Spotify.Enabled && d.spotify != nil && d.spotify.IsConnected() && (d.cfg.Spotify.Prefer || d.media.GetCurrentSession().Source == "spotify") {
+			var spErr error
+			switch cmd {
+			case media.CommandPlay, media.CommandTogglePlay:
+				spErr = d.spotify.Play(context.Background())
+			case media.CommandPause:
+				spErr = d.spotify.Pause(context.Background())
+			case media.CommandNext:
+				spErr = d.spotify.Next(context.Background())
+			case media.CommandPrevious:
+				spErr = d.spotify.Previous(context.Background())
+			}
+			if spErr == nil {
+				r.Broadcast(rpc.TopicMediaState, d.media.GetCurrentSession())
+				return map[string]interface{}{"ok": true}, nil
+			}
+		}
+
 		if err := d.media.Command(cmd); err != nil {
 			return nil, err
 		}

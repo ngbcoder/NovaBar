@@ -297,7 +297,7 @@ away on the board.
 | M25 — Files app | Planned | `explorer`, `files` |
 | M26 - Dynamic Island | Partial | `ui`, `widgets`, `power-user`, `media`, `plugin`, `DynamicIsland` |
 | M27 — Full shell replacement | Option | `explorer`, `windows-shell` |
-| M28 — Spotify Integration | Partial | `audio`, `widgets`, `media` |
+| M28 — Spotify Integration | Done | `audio`, `widgets`, `media` |
 | M29 — Installer | Planned | `core`, `ui`, `safety` |
 <!-- ROADMAP:END -->
 

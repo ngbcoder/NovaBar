@@ -26,7 +26,7 @@
 - [x] Island expanded view shows Spotify queue.
 - [x] `spotify.prefer` toggle switches island source from GSMTC to Spotify.
 - [x] Fallback to GSMTC when Spotify is unavailable or not connected.
-- [ ] End-to-end test with a real Spotify client ID.
+- [x] End-to-end test with a real Spotify client ID.
 
 ## Phase 3: Interruptibility / priority
 - [ ] Define priority levels (media < notification < user action).
