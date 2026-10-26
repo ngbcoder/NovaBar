@@ -5,6 +5,8 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/ngbcoder/NovaBar/internal/config"
+	"github.com/ngbcoder/NovaBar/internal/tiling"
 	"github.com/ngbcoder/NovaBar/internal/win"
 	"golang.org/x/sys/windows"
 )
@@ -48,6 +50,7 @@ type WindowTracker struct {
 	order   []windows.HWND
 	windows map[windows.HWND]*WindowInfo
 	procs   map[uint32]string
+	rules   *tiling.RuleSet
 
 	// events carries coalesced window-lifecycle notifications to the daemon's event
 	// pump. The WinEvent hook must stay cheap, so it only enqueues here.
@@ -91,6 +94,13 @@ func NewWindowTracker() *WindowTracker {
 	}
 }
 
+// SetRules updates the rule set used to filter windows during tracking.
+func (t *WindowTracker) SetRules(rules []config.RuleConfig) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.rules = tiling.NewRuleSet(rules)
+}
+
 // Events returns the channel carrying coalesced window lifecycle notifications.
 func (t *WindowTracker) Events() <-chan WinEvent {
 	return t.events
@@ -131,8 +141,26 @@ func (t *WindowTracker) IsManageable(hwnd windows.HWND) bool {
 
 	// Windows with no title are almost always message boxes' owner windows or
 	// transient helper surfaces.
-	if title, _ := win.GetWindowText(hwnd); title == "" {
+	title, _ := win.GetWindowText(hwnd)
+	if title == "" {
 		return false
+	}
+
+	t.mu.RLock()
+	rs := t.rules
+	t.mu.RUnlock()
+
+	if rs != nil {
+		pid, _ := win.GetWindowPID(hwnd)
+		procName := t.processName(pid)
+		decision := rs.Evaluate(tiling.WindowAttributes{
+			ProcName: procName,
+			Class:    className,
+			Title:    title,
+		})
+		if decision.Action == tiling.ActionIgnore {
+			return false
+		}
 	}
 
 	return true

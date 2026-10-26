@@ -323,6 +323,7 @@ func (d *daemon) setup() error {
 	}
 
 	d.engine = tiling.NewEngine(d.cfg)
+	d.trk.SetRules(d.cfg.Rules)
 
 	d.rpcs = rpc.NewServer()
 	d.registerRPCMethods()
@@ -422,15 +423,15 @@ func (d *daemon) applyBars(cfg config.Config) {
 		})
 	}
 
+	// How far the bars reach is a setting, and it changes the rectangles, so it is
+	// applied before they are created.
+	d.bars.SetScope(cfg.General.BarScope)
+
 	for _, err := range d.bars.Apply(specs) {
 		log.Printf("[NovaBar] %v\n", err)
 	}
 
 	d.warnAboutCollapsedBars()
-
-	// How far the bars reach is a setting, and it changes the rectangles, so it is
-	// applied before they are recomputed.
-	d.bars.SetScope(cfg.General.BarScope)
 
 	// Recompute every bar's rectangle before attaching surfaces, so adjacent edges do
 	// not both claim the corner and a left dock starts below the top bar rather than
@@ -1267,6 +1268,7 @@ func (d *daemon) toggleLauncher() {
 
 	ov.SetBootstrap(js)
 	ov.Navigate(webview.WidgetURL(d.rpcs.Port(), "launcher"))
+	d.focusWindow(ov.HWND())
 }
 
 // toggleSettings opens or closes the settings overlay.
@@ -1351,6 +1353,7 @@ func (d *daemon) toggleSettings() {
 
 	ov.SetBootstrap(js)
 	ov.Navigate(webview.WidgetURL(d.rpcs.Port(), "settings"))
+	d.focusWindow(ov.HWND())
 }
 
 // spotifyCallbackServer listens for the OAuth redirect and exchanges the code.
@@ -1965,6 +1968,7 @@ func (d *daemon) configPump() {
 		d.cfg = cfg
 
 		d.engine.SetConfig(cfg)
+		d.trk.SetRules(cfg.Rules)
 		d.engine.DetectMonitors()
 
 		// Adding, removing or resizing bars takes effect immediately; this is the

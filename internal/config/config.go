@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -312,6 +313,7 @@ func DefaultConfig() Config {
 			{Process: "Taskmgr.exe", Action: "float"},
 			{Process: "explorer.exe", Class: "OperationStatusWindow", Action: "float"},
 			{Process: "TextInputHost.exe", Action: "ignore"},
+			{Process: "Raycast.exe", Action: "ignore"},
 		},
 		Dock: DockConfig{
 			Enabled:      true,
@@ -333,11 +335,28 @@ func DefaultConfig() Config {
 	}
 }
 
+const ConfigEnv = "NOVABAR_CONFIG"
+
+func isFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
 // GetConfigPath returns the config file location.
 //
-// The config lives under %APPDATA%\NovaBar, next to the pin store and the IPC
-// discovery file, so all three subsystems agree on where state lives.
+// Prefers NOVABAR_CONFIG env, then local config.toml in working directory (when not testing),
+// then falls back to %APPDATA%\NovaBar\config.toml.
 func GetConfigPath() (string, error) {
+	if path := os.Getenv(ConfigEnv); path != "" {
+		if isFile(path) {
+			return filepath.Clean(path), nil
+		}
+	}
+
+	if flag.Lookup("test.v") == nil && isFile("config.toml") {
+		return "config.toml", nil
+	}
+
 	base := os.Getenv("APPDATA")
 	if base == "" {
 		home, err := os.UserHomeDir()
@@ -346,7 +365,9 @@ func GetConfigPath() (string, error) {
 		}
 		base = filepath.Join(home, "AppData", "Roaming")
 	}
-	return filepath.Join(base, "NovaBar", "config.toml"), nil
+	appDir := filepath.Join(base, "NovaBar")
+	_ = os.MkdirAll(appDir, 0755)
+	return filepath.Join(appDir, "config.toml"), nil
 }
 
 // Load loads the config, creating a default file on first run.

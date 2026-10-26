@@ -19,7 +19,8 @@ func main() {
 		os.Exit(watchdog.Entry(pid))
 	}
 
-	for _, arg := range os.Args[1:] {
+	for i := 1; i < len(os.Args); i++ {
+		arg := os.Args[i]
 		switch arg {
 		case "--version", "-v":
 			fmt.Printf("NovaBar %s\n", Version)
@@ -27,6 +28,11 @@ func main() {
 		case "--help", "-h":
 			usage()
 			return
+		case "--config", "-c":
+			if i+1 < len(os.Args) {
+				os.Setenv("NOVABAR_CONFIG", os.Args[i+1])
+				i++
+			}
 		}
 	}
 
@@ -38,6 +44,7 @@ func usage() {
 
 Usage:
   novabar.exe                run the shell daemon
+  novabar.exe --config <path> run with a custom config file
   novabar.exe --version      print the version
 
 Recovery:

@@ -1,10 +1,9 @@
 [general]
-# How far the bars reach: 'primary' keeps them on the primary display, 'desktop' spans every display.
-bar_scope = 'primary'
 first_run = false
 log_level = 'info'
 rescue_hotkey = 'Ctrl+Alt+Shift+R'
 hide_taskbar = true
+bar_scope = 'primary'
 
 [tiling]
 enabled = true
@@ -27,6 +26,36 @@ workspace_prev = 'Alt+Left'
 workspace_next = 'Alt+Right'
 settings = 'Ctrl+Alt+S'
 
+[keymap]
+[keymap.keymap]
+focus_down = 'Ctrl+Alt+J'
+focus_left = 'Ctrl+Alt+H'
+focus_right = 'Ctrl+Alt+L'
+focus_up = 'Ctrl+Alt+K'
+move_down = 'Ctrl+Alt+Shift+J'
+move_left = 'Ctrl+Alt+Shift+H'
+move_right = 'Ctrl+Alt+Shift+L'
+move_up = 'Ctrl+Alt+Shift+K'
+move_workspace_1 = 'Ctrl+Shift+1'
+move_workspace_2 = 'Ctrl+Shift+2'
+move_workspace_3 = 'Ctrl+Shift+3'
+move_workspace_4 = 'Ctrl+Shift+4'
+move_workspace_5 = 'Ctrl+Shift+5'
+move_workspace_6 = 'Ctrl+Shift+6'
+move_workspace_7 = 'Ctrl+Shift+7'
+move_workspace_8 = 'Ctrl+Shift+8'
+move_workspace_9 = 'Ctrl+Shift+9'
+resize = 'Ctrl+Alt+Win+R'
+workspace_1 = 'Alt+1'
+workspace_2 = 'Alt+2'
+workspace_3 = 'Alt+3'
+workspace_4 = 'Alt+4'
+workspace_5 = 'Alt+5'
+workspace_6 = 'Alt+6'
+workspace_7 = 'Alt+7'
+workspace_8 = 'Alt+8'
+workspace_9 = 'Alt+9'
+
 [[rules]]
 process = 'Taskmgr.exe'
 class = ''
@@ -41,6 +70,12 @@ action = 'float'
 
 [[rules]]
 process = 'TextInputHost.exe'
+class = ''
+title = ''
+action = 'ignore'
+
+[[rules]]
+process = 'Raycast.exe'
 class = ''
 title = ''
 action = 'ignore'
@@ -60,5 +95,5 @@ show_date = true
 
 [spotify]
 enabled = false
-client_id = ""
+client_id = ''
 prefer = false

@@ -277,8 +277,8 @@ away on the board.
 | M5 — App launcher, GSMTC media | Done | `shell`, `ui`, `win32` |
 | M6 — Settings menu | Done | `ui`, `widgets`, `safety` |
 | M7 — Per-app volume | Done | `audio`, `win32` |
-| M8 — Keyboard window management | In Progress | `core`, `power-user`, `ui` |
-| M9 — Multi-monitor correctness | In Progress | `win32`, `multi-monitor` |
+| M8 — Keyboard window management | Done | `core`, `power-user`, `ui` |
+| M9 — Multi-monitor correctness | Done | `win32`, `multi-monitor` |
 | M10 — HiDPI and per-monitor scaling | Planned | `multi-monitor`, `accessibility`, `ui` |
 | M11 — Accessibility | Planned | `accessibility`, `ui` |
 | M12 — GSMTC media reads | Done | `media`, `winrt`, `win32` |
