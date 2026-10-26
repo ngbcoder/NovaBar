@@ -21,7 +21,8 @@ Go 1.22+ to build. No other dependencies.
 ## Status
 
 Milestones 1–7 are complete, and so is M12, which is the media work that M5 left half
-finished, and M9, which is the multi-monitor correctness work.
+finished, and M9, which is the multi-monitor correctness work. M26 (Dynamic Island,
+embedded in the top bar) and M28 (Spotify integration) are now shipped.
 
 Three surfaces are live, all WebView2 hosted inside the shell's own windows and all
 talking to the daemon over authenticated, permission-checked JSON-RPC:
@@ -177,6 +178,7 @@ internal/watchdog detached recovery process
 internal/webview  WebView2 surfaces hosted in the shell's own windows
 internal/overlay  transient surfaces that reserve no work area (the launcher)
 internal/media    GSMTC bridge: session reads, playback state, transport control
+internal/spotify  Spotify Web API client: PKCE OAuth, token storage, current track, queue, transport
 internal/winrt    the slice of the COM and WinRT ABI the media bridge needs
 internal/winmd    reads Windows Runtime metadata, for identifiers and slot order
 internal/volume   per-application audio volume via Core Audio (WASAPI)
@@ -295,9 +297,9 @@ away on the board.
 | M23 — Persistence and theming | Planned | `persistence`, `ui` |
 | M24 — Plugin API for widgets | Planned | `widgets`, `plugin` |
 | M25 — Files app | Planned | `explorer`, `files` |
-| M26 - Dynamic Island | Next | `ui`, `widgets`, `power-user`, `media`, `plugin`, `DynamicIsland` |
+| M26 - Dynamic Island | Done | `ui`, `widgets`, `power-user`, `media`, `plugin`, `DynamicIsland` |
 | M27 — Full shell replacement | Option | `explorer`, `windows-shell` |
-| M28 — Spotify Integration | Planned | `audio`, `widgets`, `media` |
+| M28 — Spotify Integration | Done | `audio`, `widgets`, `media` |
 <!-- ROADMAP:END -->
 
 The notes that follow explain the milestones where the reasoning is not obvious from the
@@ -478,6 +480,40 @@ here and the only one that means truly owning the desktop: a long tail of shell 
 and weeks of work.
 
 Everything above it is worth doing whether or not this ever happens.
+
+### M26 — Dynamic Island (embedded in the top bar)
+
+Shipped as an embedded surface rather than a floating overlay. The top bar's center
+is a persistent pill that always shows the clock and date; when media is playing it
+widens and shows the track title and artist, with transport controls revealed on
+hover or click. The floating island overlay and its daemon code have been removed.
+
+Configured via the `[island]` section of `config.toml`:
+- `show_media`, `show_clock`, `show_date` toggle the pill's segments.
+- `spotify.prefer = true` switches the pill's source from GSMTC to the Spotify Web API.
+
+### M28 — Spotify Integration
+
+Shipped. OAuth2 with PKCE (no client secret), tokens stored under
+`%APPDATA%\\NovaBar\\spotify.json`. The bar pill shows the current track and queue
+when `spotify.prefer` is enabled and a Spotify session is active, falling back to
+GSMTC otherwise.
+
+Setup:
+1. Create an app in the Spotify developer dashboard.
+2. Set the redirect URI to `http://127.0.0.1:8910/spotify/callback`.
+3. Add to `config.toml`:
+   ```toml
+   [spotify]
+   enabled = true
+   client_id = "your_client_id"
+   prefer = true
+   ```
+4. Connect via the `spotify.connect` RPC method (opens the browser for authorization).
+
+RPC methods: `spotify.status`, `spotify.queue`, `spotify.play`, `spotify.pause`,
+`spotify.next`, `spotify.previous`, `spotify.connect`. All reuse the existing
+`windows.read` / `media.control` permissions.
 
 ## Media sessions (M5, M12)
 
