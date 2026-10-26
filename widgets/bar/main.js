@@ -80,7 +80,7 @@ function renderMedia(session) {
     el.island.classList.remove('has-media');
     return;
   }
-  const hasMedia = Boolean(session && session.source === 'gsmtc' && session.title);
+  const hasMedia = Boolean(session && session.title && session.source && session.source !== 'none');
   el.media.hidden = !hasMedia;
   el.island.classList.toggle('has-media', hasMedia);
   if (!hasMedia) return;
@@ -88,8 +88,8 @@ function renderMedia(session) {
   el.mediaTitle.textContent = session.title;
   el.mediaArtist.textContent = session.artist || '';
   el.mediaToggle.classList.toggle('is-playing', session.playback === 'playing');
-  el.mediaNext.disabled = !session.can_next;
-  el.mediaPrev.disabled = !session.can_previous;
+  el.mediaNext.disabled = session.can_next === false;
+  el.mediaPrev.disabled = session.can_previous === false;
 }
 
 function mediaCommand(command) {
