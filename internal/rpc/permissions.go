@@ -108,6 +108,7 @@ var methodPermissions = map[string]string{
 	MethodSpotifyNext:          PermMediaControl,
 	MethodSpotifyPrevious:      PermMediaControl,
 	MethodSpotifyConnect:       PermMediaControl,
+	MethodSpotifyDisconnect:    PermMediaControl,
 	MethodVolumeList:           PermAudioRead,
 	MethodVolumeSet:            PermAudioControl,
 	MethodVolumeMute:           PermAudioControl,

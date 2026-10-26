@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/ngbcoder/NovaBar/internal/win"
 )
 
 // Validation errors surfaced to RPC callers.
@@ -36,6 +38,13 @@ func Launch(target string) error {
 		return launchViaShell(target)
 	}
 
+	// Other protocol URIs (ms-settings:, http:, mailto:) are handled by the shell
+	// too. CreateProcess cannot start them, which is why the Settings entry in the
+	// built-in command list never worked.
+	if isProtocolURI(target) {
+		return win.ShellExecute(target)
+	}
+
 	// Bare name: resolve through PATH so we never hand it to cmd.
 	if !strings.ContainsAny(target, `:\/`) {
 		resolved, err := exec.LookPath(target)
@@ -56,6 +65,29 @@ func Launch(target string) error {
 	}
 
 	return launchDirect(target)
+}
+
+// isProtocolURI reports whether target is a shell protocol URI rather than a path.
+//
+// A URI has a scheme before the colon. Single-character schemes are treated as drive
+// letters, so "C:\Windows" is never mistaken for a protocol.
+func isProtocolURI(target string) bool {
+	i := strings.IndexByte(target, ':')
+	if i < 2 {
+		return false
+	}
+
+	for j := 0; j < i; j++ {
+		c := target[j]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z':
+		case j > 0 && c >= '0' && c <= '9':
+		case j > 0 && (c == '+' || c == '-' || c == '.'):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // launchDirect starts an executable with no command interpreter involved.

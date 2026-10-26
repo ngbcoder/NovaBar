@@ -38,6 +38,10 @@ type MediaSession struct {
 	Artist string `json:"artist"`
 	Album  string `json:"album"`
 
+	// Artwork is a URL to album art, when the source can provide one. Sources that
+	// cannot leave it empty and the UI draws a placeholder.
+	Artwork string `json:"artwork,omitempty"`
+
 	Playback PlaybackState `json:"playback"`
 
 	// Timeline position and duration in seconds.

@@ -160,6 +160,8 @@ func TestValidateTargetAcceptsLegitimate(t *testing.T) {
 		`shell:AppsFolder`,
 		`Microsoft.WindowsCalculator_8wekyb3d8bbwe!App`,
 		`ms-settings:`,
+		`ms-settings:network-wifi`,
+		`https://example.com`,
 	}
 
 	for _, target := range legit {
@@ -202,6 +204,25 @@ func TestIsURL(t *testing.T) {
 	for in, want := range cases {
 		if got := IsURL(in); got != want {
 			t.Errorf("IsURL(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestIsProtocolURI(t *testing.T) {
+	cases := map[string]bool{
+		"ms-settings:":                    true,
+		"ms-settings:network-wifi":        true,
+		"https://example.com":             true,
+		"mailto:someone@example.com":      true,
+		`C:\Windows\System32\notepad.exe`: false,
+		`C:/Windows/System32/notepad.exe`: false,
+		"notepad.exe":                     false,
+		"shell:AppsFolder":                true,
+		"1nvalid:thing":                   false,
+	}
+	for in, want := range cases {
+		if got := isProtocolURI(in); got != want {
+			t.Errorf("isProtocolURI(%q) = %v, want %v", in, got, want)
 		}
 	}
 }

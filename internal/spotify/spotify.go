@@ -31,11 +31,43 @@ const (
 
 // Track is the metadata for one Spotify track.
 type Track struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Artists  []string `json:"artists"`
-	Album    string   `json:"album"`
-	IsPlaying bool    `json:"is_playing"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Artists   []string `json:"artists"`
+	Album     string   `json:"album"`
+	Artwork   string   `json:"artwork,omitempty"`
+	IsPlaying bool     `json:"is_playing"`
+}
+
+// albumImage is one entry of an album's image list.
+type albumImage struct {
+	URL   string `json:"url"`
+	Width int    `json:"width"`
+}
+
+// artworkURL picks an album image from the API's list.
+//
+// The list arrives widest first, so the smallest image that is still comfortably
+// larger than the thumbnail is the cheapest one that will not look soft on a
+// high-density display. Falls back to whatever is there rather than to nothing.
+func artworkURL(images []albumImage) string {
+	best := ""
+	bestWidth := 0
+	for _, img := range images {
+		if img.URL == "" {
+			continue
+		}
+		if best == "" {
+			best = img.URL
+			bestWidth = img.Width
+			continue
+		}
+		if img.Width >= 128 && (bestWidth < 128 || img.Width < bestWidth) {
+			best = img.URL
+			bestWidth = img.Width
+		}
+	}
+	return best
 }
 
 // Token holds the OAuth2 credentials.
@@ -124,6 +156,25 @@ func (c *Client) IsConnected() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.token.AccessToken != ""
+}
+
+// Disconnect forgets the stored credentials.
+//
+// Removing the file rather than writing an empty token means the next start cannot
+// half-load a credential from a previous account.
+func (c *Client) Disconnect() error {
+	c.mu.Lock()
+	c.token = Token{}
+	c.mu.Unlock()
+
+	path, err := TokenPath()
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // AuthURL returns the URL the user should open to connect Spotify.
@@ -267,10 +318,11 @@ func (c *Client) CurrentTrack(ctx context.Context) (Track, error) {
 	var payload struct {
 		IsPlaying bool `json:"is_playing"`
 		Item      struct {
-			ID     string `json:"id"`
-			Name   string `json:"name"`
-			Album  struct {
-				Name string `json:"name"`
+			ID    string `json:"id"`
+			Name  string `json:"name"`
+			Album struct {
+				Name   string       `json:"name"`
+				Images []albumImage `json:"images"`
 			} `json:"album"`
 			Artists []struct {
 				Name string `json:"name"`
@@ -284,6 +336,7 @@ func (c *Client) CurrentTrack(ctx context.Context) (Track, error) {
 		ID:        payload.Item.ID,
 		Name:      payload.Item.Name,
 		Album:     payload.Item.Album.Name,
+		Artwork:   artworkURL(payload.Item.Album.Images),
 		IsPlaying: payload.IsPlaying,
 	}
 	for _, a := range payload.Item.Artists {
@@ -312,9 +365,9 @@ func (c *Client) Queue(ctx context.Context) ([]Track, error) {
 	}
 	var payload struct {
 		Queue []struct {
-			ID     string `json:"id"`
-			Name   string `json:"name"`
-			Album  struct {
+			ID    string `json:"id"`
+			Name  string `json:"name"`
+			Album struct {
 				Name string `json:"name"`
 			} `json:"album"`
 			Artists []struct {

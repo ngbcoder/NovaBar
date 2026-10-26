@@ -48,6 +48,7 @@ var (
 	procEnumDisplayMonitors = modUser32.NewProc("EnumDisplayMonitors")
 	procGetMonitorInfoW     = modUser32.NewProc("GetMonitorInfoW")
 	procMonitorFromWindow   = modUser32.NewProc("MonitorFromWindow")
+	procMonitorFromRect     = modUser32.NewProc("MonitorFromRect")
 
 	// Window class and creation procedures
 	procRegisterClassExW = modUser32.NewProc("RegisterClassExW")
@@ -115,13 +116,18 @@ const (
 
 // Window messages handled on the pinned message pump thread.
 const (
-	WM_HOTKEY  = 0x0312
+	WM_HOTKEY = 0x0312
 
 	// WM_APP is the base of the private message range. NovaBar uses one message
 	// from it to wake the pump for work that has to run on the pump thread.
-	WM_APP = 0x8000
+	WM_APP     = 0x8000
 	WM_CLOSE   = 0x0010
 	WM_DESTROY = 0x0002
+	// WM_ACTIVATE tells a window that it gained or lost the foreground. A popover
+	// uses WA_INACTIVE to put itself away when the user clicks elsewhere.
+	WM_ACTIVATE = 0x0006
+
+	WA_INACTIVE = 0
 )
 
 // Window styles and attributes

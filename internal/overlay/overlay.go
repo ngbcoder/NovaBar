@@ -12,6 +12,8 @@ package overlay
 import (
 	"fmt"
 	"log"
+	"sync"
+	"time"
 
 	"github.com/ngbcoder/NovaBar/internal/webview"
 	"github.com/ngbcoder/NovaBar/internal/win"
@@ -21,11 +23,53 @@ import (
 // windowClassName is the shared class for overlay windows.
 const windowClassName = "NovaBarOverlayClass"
 
+// blurDismissGrace is how long after arming a deactivation is still treated as part of
+// the click that opened the popover.
+const blurDismissGrace = 150 * time.Millisecond
+
+// overlays lets the shared window procedure find the Overlay that owns an HWND.
+//
+// The procedure is one module-level thunk, so it has no receiver; the HWND is the only
+// thing Windows hands it. Overlays are created and destroyed on the pump thread, but a
+// mutex keeps the map honest if anything else ever asks.
+var (
+	overlaysMu sync.Mutex
+	overlays   = make(map[windows.HWND]*Overlay)
+)
+
+func registerOverlay(hwnd windows.HWND, o *Overlay) {
+	overlaysMu.Lock()
+	overlays[hwnd] = o
+	overlaysMu.Unlock()
+}
+
+func unregisterOverlay(hwnd windows.HWND) {
+	overlaysMu.Lock()
+	delete(overlays, hwnd)
+	overlaysMu.Unlock()
+}
+
+func lookupOverlay(hwnd windows.HWND) *Overlay {
+	overlaysMu.Lock()
+	defer overlaysMu.Unlock()
+	return overlays[hwnd]
+}
+
 // wndProc is the single shared window-procedure thunk for overlay windows.
 //
 // Module level so exactly one callback thunk exists, matching the rest of the project.
 var wndProc = windows.NewCallback(func(hwnd windows.HWND, msg uint32, wParam, lParam uintptr) uintptr {
 	switch msg {
+	case win.WM_ACTIVATE:
+		// A popover that keeps the foreground after the user clicks somewhere else is
+		// not behaving like a popover: it should put itself away. Only overlays that
+		// ask for this are affected; the dock stays put.
+		if uint32(wParam)&0xFFFF == win.WA_INACTIVE {
+			if o := lookupOverlay(hwnd); o != nil {
+				o.dismissOnBlur()
+			}
+		}
+		return 0
 	case win.WM_DESTROY:
 		return 0
 	}
@@ -46,6 +90,19 @@ type Options struct {
 	OnClose func()
 	// OnMessage receives strings posted from the page.
 	OnMessage func(payload string)
+
+	// DismissOnBlur closes the overlay when it loses the foreground, which is what
+	// makes a popover feel like one: clicking anywhere else puts it away. Only
+	// meaningful for surfaces the user opened; the dock is always present.
+	DismissOnBlur bool
+	// OnDismiss fires after the overlay closed itself because it lost the foreground.
+	// It does not fire when the owner calls Close.
+	OnDismiss func()
+
+	// OnBlurDismiss, when set, is called instead of self-closing when the overlay
+	// loses the foreground. The owner is then responsible for closing the window,
+	// which lets it play an exit animation before destroying the surface.
+	OnBlurDismiss func()
 
 	// Position places the window: "center" (the default) or "bottom".
 	//
@@ -75,9 +132,17 @@ type Overlay struct {
 	hwnd    windows.HWND
 	surface *webview.Surface
 	closed  bool
+	closing bool
 	// persistent marks a window that is always present rather than something the user
 	// opened, so a page posting the dismiss sentinel does not close it.
 	persistent bool
+	// blurArmedAt is when the owner asked blur to start dismissing the window.
+	//
+	// Zero means "not yet". Windows can activate a window before it is registered in
+	// the HWND map, and it can send the inactive message while the popover is still
+	// opening, so neither event is a reliable signal that the user has clicked away.
+	// The owner arms this after it has deliberately focused the window.
+	blurArmedAt time.Time
 	// opts are the options the overlay was created with, kept so a resize can put
 	// the window back where it belongs.
 	opts Options
@@ -158,6 +223,7 @@ func Show(opts Options) (*Overlay, error) {
 	}
 
 	o := &Overlay{hwnd: hwnd, persistent: opts.Persistent, opts: opts}
+	registerOverlay(hwnd, o)
 
 	bg := webview.Color{R: 20, G: 22, B: 26, A: 255}
 	if opts.Transparent {
@@ -177,6 +243,7 @@ func Show(opts Options) (*Overlay, error) {
 		},
 	})
 	if err != nil {
+		unregisterOverlay(hwnd)
 		win.DestroyWindow(hwnd)
 		return nil, err
 	}
@@ -275,6 +342,39 @@ func (o *Overlay) Resize(width, height int32) error {
 	return nil
 }
 
+// ResizeTo moves the overlay to an exact screen rectangle.
+//
+// Resize re-centres a window from its anchor, which is right for the dock but wrong for
+// a popover pinned to a bar: growing the quick-settings panel has to keep its edge on the
+// bar, not drift toward the middle of the screen. The caller supplies the finished
+// rectangle instead.
+//
+// Must run on the message pump thread, for the same reason as Resize.
+func (o *Overlay) ResizeTo(rect win.RECT) error {
+	if o == nil || o.closed || o.hwnd == 0 {
+		return fmt.Errorf("overlay is not open")
+	}
+	width, height := rect.Width(), rect.Height()
+	if width <= 0 || height <= 0 {
+		return fmt.Errorf("overlay size %dx%d is not usable", width, height)
+	}
+
+	if err := win.SetWindowPos(o.hwnd, 0, rect.Left, rect.Top, width, height, win.SWP_NOZORDER|win.SWP_NOACTIVATE); err != nil {
+		return fmt.Errorf("could not move the overlay window: %w", err)
+	}
+
+	if o.surface != nil {
+		o.surface.Resize(0, 0, width, height)
+	}
+
+	o.opts.Rect = &rect
+	o.opts.Width = width
+	o.opts.Height = height
+
+	log.Printf("[NovaBar Overlay] Moved to %dx%d at %d,%d\n", width, height, rect.Left, rect.Top)
+	return nil
+}
+
 // HWND returns the overlay's window handle.
 func (o *Overlay) HWND() windows.HWND {
 	if o == nil {
@@ -307,13 +407,34 @@ func (o *Overlay) Navigate(url string) {
 	o.surface.Navigate(url)
 }
 
-// Close destroys the overlay. Safe to call more than once.
+// BeginClose starts the overlay's exit animation, if any. The owner is still
+// responsible for calling Close after the animation has had time to play.
+func (o *Overlay) BeginClose() {
+	if o == nil || o.closed || o.closing {
+		return
+	}
+	o.closing = true
+	if o.surface != nil {
+		o.surface.Eval("document.body.classList.add('is-closing')")
+	}
+}
+
+// IsClosing reports whether an animated close has been requested.
+func (o *Overlay) IsClosing() bool {
+	if o == nil {
+		return false
+	}
+	return o.closing
+}
 func (o *Overlay) Close() {
 	if o == nil || o.closed {
 		return
 	}
 	o.closed = true
 
+	if o.hwnd != 0 {
+		unregisterOverlay(o.hwnd)
+	}
 	if o.surface != nil {
 		o.surface.Destroy()
 		o.surface = nil
@@ -327,6 +448,45 @@ func (o *Overlay) Close() {
 	win.RefreshDesktop()
 
 	log.Println("[NovaBar Overlay] Closed")
+}
+
+// ArmDismissOnBlur starts treating loss of the foreground as a dismissal.
+//
+// Call this only after the window has been focused on purpose. Until then an inactive
+// activation can be part of opening the popover, and closing on it would make the panel
+// flash on screen and vanish.
+func (o *Overlay) ArmDismissOnBlur() {
+	if o == nil || o.closed || !o.opts.DismissOnBlur {
+		return
+	}
+	o.blurArmedAt = time.Now()
+}
+
+// dismissOnBlur puts the overlay away when it loses the foreground.
+//
+// Called from the window procedure, so it must stay cheap and must not block. The
+// owner's OnDismiss callback runs after the window is gone, which is what lets the
+// daemon drop its reference and revoke the widget credential.
+func (o *Overlay) dismissOnBlur() {
+	if o == nil || o.closed || !o.opts.DismissOnBlur || o.blurArmedAt.IsZero() {
+		return
+	}
+	// The mouse gesture that opened the panel finishes just after it is focused. A
+	// deactivation in that window is the tail of the opening click, not a click away.
+	if time.Since(o.blurArmedAt) < blurDismissGrace {
+		return
+	}
+	if o.closing {
+		return
+	}
+	if o.opts.OnBlurDismiss != nil {
+		o.opts.OnBlurDismiss()
+		return
+	}
+	o.Close()
+	if o.opts.OnDismiss != nil {
+		o.opts.OnDismiss()
+	}
 }
 
 // String describes the overlay for logging.

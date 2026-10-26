@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Quick Settings</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --base: rgba(18, 20, 28, 0.94);
+      --panel: rgba(255, 255, 255, 0.08);
+      --fg: #f4f5f7;
+      --dim: rgba(255, 255, 255, 0.55);
+      --accent: #2ee6a8;
+      --accent-ink: #061a14;
+      --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+    }
+    body {
+      padding: 10px;
+      color: var(--fg);
+      font: 13px/1.4 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+    }
+
+    .panel {
+      width: max-content;
+      min-height: 200px;
+      display: flex;
+      flex-direction: row;
+      align-items: stretch;
+      gap: 10px;
+      padding: 14px;
+      border-radius: 18px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 45%),
+        var(--base);
+      /* The shadow has to fade out inside the 10px padding around the card.
+         Anything larger is clipped by the overlay window and reads as a square
+         grey band around the panel. The backdrop-filter is deliberately absent:
+         the card is 94% opaque, so it only cost a compositor layer. */
+      box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.55),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      /* Delayed rather than started on load. The panel measures its content and the
+         daemon resizes the window from that report, so the card is held invisible for
+         the round trip: animating immediately painted a narrow card that then jumped
+         to its full width. */
+      animation: drop-in 180ms cubic-bezier(0.34, 1.56, 0.64, 1) 120ms both;
+    }
+    @keyframes drop-in {
+      from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes drop-out {
+      from { opacity: 1; transform: translateY(0) scale(1); }
+      to { opacity: 0; transform: translateY(-6px) scale(0.96); }
+    }
+    body.is-closing .panel {
+      animation: drop-out 140ms cubic-bezier(0.4, 0, 1, 1) both;
+      pointer-events: none;
+    }
+
+    header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      padding: 0 2px;
+    }
+    h1 {
+      font-size: 12px;
+      font-weight: 650;
+      letter-spacing: 0.2px;
+    }
+    header span {
+      font-size: 10.5px;
+      color: var(--dim);
+      letter-spacing: 0.3px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      flex: 1;
+    }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      min-height: 56px;
+      border: none;
+      border-radius: 12px;
+      background: var(--panel);
+      color: var(--fg);
+      font: inherit;
+      font-weight: 550;
+      text-align: left;
+      cursor: pointer;
+      transition:
+        background 140ms var(--ease-out),
+        transform 100ms var(--ease-out),
+        box-shadow 140ms var(--ease-out);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.14);
+    }
+    .btn:active {
+      transform: scale(0.97);
+    }
+    .btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .btn svg {
+      width: 18px;
+      height: 18px;
+      flex: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
+    }
+
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: 292px;
+    }
+
+    .queue {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 240px;
+      height: 172px;
+      padding-right: 12px;
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .queue[hidden] {
+      display: none;
+    }
+    .queue-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      padding: 0 2px;
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+    .queue-head span:last-child {
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+    }
+    .queue-list {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      list-style: none;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+    }
+    .queue-list::-webkit-scrollbar {
+      width: 6px;
+    }
+    .queue-list::-webkit-scrollbar-thumb {
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.2);
+    }
+    .queue-list::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .queue-item {
+      display: grid;
+      grid-template-columns: 16px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      padding: 4px 2px;
+      border-radius: 8px;
+    }
+    .queue-index {
+      font-size: 10.5px;
+      color: var(--dim);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .queue-text {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .queue-title,
+    .queue-artist {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .queue-title {
+      font-size: 12px;
+      font-weight: 550;
+    }
+    .queue-artist {
+      font-size: 10.5px;
+      color: var(--dim);
+    }
+
+    /* The queue column is measured once, when the panel opens, and the daemon sizes
+       the window from that measurement. Rows that arrive a moment later cannot be
+       allowed to grow the panel under the pointer, so the column keeps its size and
+       holds placeholder rows until the first response. */
+    .queue-item.is-ghost {
+      animation: queue-breathe 1.35s ease-in-out infinite;
+    }
+    .queue-item.is-ghost:nth-child(2) { animation-delay: 120ms; }
+    .queue-item.is-ghost:nth-child(3) { animation-delay: 240ms; }
+    .queue-item.is-ghost:nth-child(4) { animation-delay: 360ms; }
+    .queue-item.is-ghost:nth-child(5) { animation-delay: 480ms; }
+    .queue-item.is-ghost .queue-text { gap: 6px; }
+    .queue-item.is-ghost .queue-index,
+    .queue-item.is-ghost .queue-title,
+    .queue-item.is-ghost .queue-artist {
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.12);
+    }
+    .queue-item.is-ghost .queue-index { height: 8px; }
+    .queue-item.is-ghost .queue-title { width: 74%; height: 9px; }
+    .queue-item.is-ghost .queue-artist { width: 46%; height: 7px; }
+    @keyframes queue-breathe {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 0.95; }
+    }
+
+    /* The column is never removed after it has been shown: a panel that resizes once
+       the answer arrives is the flicker this replaces. */
+    .queue-note {
+      margin: auto 0;
+      font-size: 11.5px;
+      line-height: 1.5;
+      color: var(--dim);
+      text-align: center;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+    @media (forced-colors: active) {
+      .btn {
+        border: 1px solid ButtonText;
+        background: ButtonFace;
+        color: ButtonText;
+      }
+      .btn:hover, .btn:active {
+        background: Highlight;
+        color: HighlightText;
+      }
+      .queue-note, .queue-artist { color: GrayText; }
+    }
+  </style>
+<body>
+<div class="panel" role="dialog" aria-modal="true" aria-labelledby="qs-title" tabindex="-1">
+  <section class="queue" id="queue" aria-label="Spotify up next" aria-busy="true">
+    <div class="queue-head">
+      <span>Up next</span>
+      <span id="queue-total"></span>
+    </div>
+    <ol class="queue-list" id="queue-list">
+      <li class="queue-item is-ghost" aria-hidden="true"><span class="queue-index"></span><span class="queue-text"><span class="queue-title"></span><span class="queue-artist"></span></span></li>
+      <li class="queue-item is-ghost" aria-hidden="true"><span class="queue-index"></span><span class="queue-text"><span class="queue-title"></span><span class="queue-artist"></span></span></li>
+      <li class="queue-item is-ghost" aria-hidden="true"><span class="queue-index"></span><span class="queue-text"><span class="queue-title"></span><span class="queue-artist"></span></span></li>
+      <li class="queue-item is-ghost" aria-hidden="true"><span class="queue-index"></span><span class="queue-text"><span class="queue-title"></span><span class="queue-artist"></span></span></li>
+      <li class="queue-item is-ghost" aria-hidden="true"><span class="queue-index"></span><span class="queue-text"><span class="queue-title"></span><span class="queue-artist"></span></span></li>
+    </ol>
+  </section>
+  <div class="controls">
+    <header>
+      <h1 id="qs-title">Quick Settings</h1>
+      <span>NovaBar</span>
+    </header>
+    <div class="grid">
+      <button class="btn" data-target="ms-settings:network-wifi" aria-label="Open Wi-Fi settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg>
+        <span>Wi-Fi</span>
+      </button>
+      <button class="btn" data-target="ms-settings:bluetooth" aria-label="Open Bluetooth settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5"/></svg>
+        <span>Bluetooth</span>
+      </button>
+      <button class="btn" data-target="ms-settings:network-airplanemode" aria-label="Open Airplane mode settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.5 1.2c-.2.4 0 .9.4 1.1l5.5 3.3-3.3 3.3-2.3-.8c-.4-.1-.8.1-.9.5l-.3.9c-.1.4.1.8.5 1l4.2 1.8 1.8 4.2c.2.4.6.6 1 .5l.9-.3c.4-.1.6-.5.5-.9l-.8-2.3 3.3-3.3 3.3 5.5c.2.4.7.6 1.1.4l1.2-.5c.4-.2.6-.6.5-1.1Z"/></svg>
+        <span>Airplane</span>
+      </button>
+      <button class="btn" data-target="ms-settings:" aria-label="Open all Windows settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06-.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Settings</span>
+      </button>
+      <button class="btn" data-target="ms-settings:display" aria-label="Open Display settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <span>Display</span>
+      </button>
+      <button class="btn" data-target="ms-settings:sound" aria-label="Open Sound settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        <span>Sound</span>
+      </button>
+      <button class="btn" data-target="ms-settings:notifications" aria-label="Open Notifications settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span>Notify</span>
+      </button>
+      <button class="btn" data-target="ms-settings:batterysaver" aria-label="Open Battery settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="6" width="18" height="12" rx="2"/><line x1="23" y1="10" x2="23" y2="14"/><path d="M5 10v4M9 10v4"/></svg>
+        <span>Battery</span>
+      </button>
+      <button class="btn" data-target="ms-settings:nightlight" aria-label="Open Night light settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <span>Night light</span>
+      </button>
+      <button class="btn" data-target="ms-settings:personalization" aria-label="Open Personalization settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20z"/></svg>
+        <span>Theme</span>
+      </button>
+      <button class="btn" data-target="ms-settings:privacy" aria-label="Open Privacy settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span>Privacy</span>
+      </button>
+    </div>
+  </div>
+</div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

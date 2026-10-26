@@ -174,27 +174,33 @@ func (m *Manager) EnsureReserved() {
 	}
 
 	for _, ab := range m.bars {
-		granted := ab.Granted()
-		if granted <= 0 {
-			continue
-		}
-		mon := ab.MonitorRect()
-		lost := false
-		switch ab.Edge() {
-		case win.ABE_TOP:
-			lost = work.Top < mon.Top+granted
-		case win.ABE_BOTTOM:
-			lost = work.Bottom > mon.Bottom-granted
-		}
-		if !lost {
-			ab.noteClaimed()
+		if !barNeedsReclaim(ab, work) {
 			continue
 		}
 		if !ab.claimDue() {
 			continue
 		}
-		ab.UpdatePosition()
+		// Re-register rather than only re-apply the position. The usual way a
+		// reservation is lost is a restart of the shell, and the shell that comes
+		// back has never heard of this window: SETPOS alone is answered politely
+		// and ignored.
+		ab.Reclaim()
 	}
+}
+
+// barNeedsReclaim reports whether a registered bar is missing the space it draws.
+//
+// The test is the work area, not what the shell answered the last time the bar asked.
+// Those two can disagree in a way that matters: a bar that registers while another
+// process' bar still owns the edge is granted nothing, and once that other bar goes
+// away the work area takes the strip back. Asking "was I granted space?" would leave
+// that bar skipped forever, with the desktop laid out under the bar and a maximized
+// window's title bar hidden behind it.
+func barNeedsReclaim(ab *AppBarManager, work win.RECT) bool {
+	if !ab.Registered() {
+		return false
+	}
+	return !ab.ownsSpace(work)
 }
 
 func screenWidth() int32  { return win.VirtualScreen().Width() }

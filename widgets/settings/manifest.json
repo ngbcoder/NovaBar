@@ -6,7 +6,8 @@
   "permissions": [
     "config.read",
     "config.write",
-    "media.control"
+    "media.control",
+    "windows.read"
   ],
   "window": {
     "kind": "overlay",

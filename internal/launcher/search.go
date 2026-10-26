@@ -210,6 +210,10 @@ func ValidateTarget(target string) error {
 	if strings.HasPrefix(strings.ToLower(target), "shell:") {
 		return nil
 	}
+	// Any other protocol URI (ms-settings:, http:, mailto:) is shell-owned too.
+	if isProtocolURI(target) {
+		return nil
+	}
 	// UWP AppUserModelID: Company.Product!Application
 	if strings.Contains(target, "!") {
 		return nil

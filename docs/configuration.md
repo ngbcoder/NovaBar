@@ -76,6 +76,12 @@ Set the redirect URI in the Spotify developer dashboard to
 `http://127.0.0.1:8910/spotify/callback`, then connect via the `spotify.connect` RPC
 method.
 
+`prefer = true` makes the Spotify Web API the source even when a local GSMTC session
+exists. With `prefer = false` the local session wins, and Spotify is used only when
+GSMTC has nothing to show. Playback on another device (Spotify Connect) is invisible
+to GSMTC, so it appears either way, and the island follows track changes from
+whichever source it chose.
+
 ## Hotkeys
 
 ```toml

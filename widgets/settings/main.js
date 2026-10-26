@@ -26,12 +26,43 @@ let values = {};
 /** Paths the daemon gates on a working rescue path. */
 let protectedPaths = new Set();
 
+/** Live Spotify state, reported by the daemon rather than inferred from the config. */
+let spotify = { configured: false, connected: false, error: '', track: null };
+let spotifyPoll = null;
+
 function showToast(message, bad = false) {
     toast.textContent = message;
     toast.classList.toggle('bad', bad);
     toast.classList.add('show');
     clearTimeout(showToast._t);
     showToast._t = setTimeout(() => toast.classList.remove('show'), 2600);
+}
+
+/** Read the connection state. The token lives in the daemon, not in this page. */
+async function refreshSpotify() {
+    try {
+        spotify = (await sdk.call('spotify.status')) || {};
+    } catch (err) {
+        spotify = { configured: false, connected: false, error: err.message || String(err) };
+    }
+}
+
+/**
+ * Poll after opening the login page so the row flips to Connected when the browser
+ * callback stores the token. Stops on success or after two minutes.
+ */
+function watchSpotifyLogin() {
+    clearInterval(spotifyPoll);
+    const deadline = Date.now() + 120000;
+    spotifyPoll = setInterval(async () => {
+        await refreshSpotify();
+        render();
+        if (spotify.connected || Date.now() > deadline) {
+            clearInterval(spotifyPoll);
+            spotifyPoll = null;
+            if (spotify.connected) showToast('Spotify connected');
+        }
+    }, 1500);
 }
 
 function showNote(message) {
@@ -46,6 +77,7 @@ async function apply(path, value) {
         // The daemon revalidates, so the accepted value may not be what was sent. Taking
         // the daemon's copy is what keeps the display honest after a clamp.
         if (res && res.value) values = { ...values, ...res.value };
+        if (path.startsWith('spotify.')) await refreshSpotify();
         render();
     } catch (err) {
         showToast(err.message || String(err), true);
@@ -89,6 +121,11 @@ function numberControl(field) {
     if (field.max) input.max = field.max;
     input.value = values[field.path] ?? '';
     input.setAttribute('aria-label', field.label);
+
+    // A number input treats the wheel as an increment, so scrolling the page with the
+    // pointer over a field would silently rewrite the setting and retile the desktop.
+    // Scrolling must never change a value.
+    input.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
 
     // Committed on blur or Enter rather than every keystroke, so typing "1" on the way to
     // "16" does not write 1 and retile the desktop in between.
@@ -217,22 +254,43 @@ function render() {
         wrap.appendChild(controlFor(field));
 
         if (field.path === 'spotify.client_id' && values[field.path]) {
-            const connectBtn = document.createElement('button');
-            connectBtn.className = 'hotkey';
-            connectBtn.style.marginLeft = '10px';
-            connectBtn.textContent = 'Connect';
-            connectBtn.addEventListener('click', async () => {
-                try {
-                    const res = await sdk.call('spotify.connect');
-                    if (res && res.url) {
-                        window.open(res.url, '_blank');
-                        showToast('Opening Spotify login in browser...');
+            const chip = document.createElement('span');
+            chip.className = 'status' + (spotify.connected ? ' on' : (spotify.error ? ' warn' : ''));
+            chip.textContent = spotify.connected ? 'Connected' : 'Not connected';
+            wrap.appendChild(chip);
+
+            const action = document.createElement('button');
+            action.className = 'hotkey small';
+            action.style.marginLeft = '8px';
+
+            if (spotify.connected) {
+                action.textContent = 'Disconnect';
+                action.addEventListener('click', async () => {
+                    try {
+                        await sdk.call('spotify.disconnect');
+                        await refreshSpotify();
+                        render();
+                        showToast('Spotify disconnected');
+                    } catch (err) {
+                        showToast(err.message || 'Could not disconnect Spotify', true);
                     }
-                } catch (err) {
-                    showToast(err.message || 'Could not connect Spotify', true);
-                }
-            });
-            wrap.appendChild(connectBtn);
+                });
+            } else {
+                action.textContent = 'Connect';
+                action.addEventListener('click', async () => {
+                    try {
+                        const res = await sdk.call('spotify.connect');
+                        if (res && res.url) {
+                            window.open(res.url, '_blank');
+                            showToast('Opening Spotify login in browser...');
+                            watchSpotifyLogin();
+                        }
+                    } catch (err) {
+                        showToast(err.message || 'Could not connect Spotify', true);
+                    }
+                });
+            }
+            wrap.appendChild(action);
         }
 
         row.append(text, wrap);
@@ -264,6 +322,7 @@ async function main() {
         if (gated.length) {
             showNote(`${gated.join(' and ')} can only be changed while the rescue hotkey works.`);
         }
+        await refreshSpotify();
         render();
     } catch (err) {
         console.error('could not load the settings schema', err);

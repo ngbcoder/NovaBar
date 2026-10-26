@@ -98,6 +98,23 @@ type daemon struct {
 	settings       *overlay.Overlay
 	settingsSecret string
 
+	// quickSettings is the panel the bar's Dynamic Island opens, nil when closed. It is
+	// an overlay because the bar window is only as tall as the bar: anything that grows
+	// below it is clipped by the Win32 surface.
+	quickSettings       *overlay.Overlay
+	quickSettingsSecret string
+	// quickSettingsBar is the bar the open panel is anchored to, so a height change can
+	// be placed beside that bar rather than assuming a top bar.
+	quickSettingsBar string
+	// lastQuickSettingsWidth and lastQuickSettingsHeight are the size the panel last
+	// reported. A new panel opens at that size instead of at the floor size and then
+	// growing, which made the window jump every time it opened.
+	lastQuickSettingsWidth  int32
+	lastQuickSettingsHeight int32
+	// quickSettingsDismissedAt is when the panel last closed itself, so the click that
+	// closed it is not mistaken for a request to open it again.
+	quickSettingsDismissedAt time.Time
+
 	// dock is the floating macOS-style dock. An overlay rather than an AppBar, because
 	// it reserves no work area.
 	dock       *overlay.Overlay
@@ -109,18 +126,34 @@ type daemon struct {
 	zoneOverlay *overlay.Overlay
 	zoneSecret  string
 
-	trk      *tracker.WindowTracker
-	engine   *tiling.Engine
-	spaces   *workspace.Manager
-	indexer  *launcher.Indexer
-	media    *media.Controller
-	spotify  *spotify.Client
-	pinStore *pins.Store
-	audio         *volume.Controller
-	notifications *notifications.Manager
-	rpcs          *rpc.Server
-	hotkeys       *hotkey.Manager
-	dog           *watchdog.Watchdog
+	trk     *tracker.WindowTracker
+	engine  *tiling.Engine
+	spaces  *workspace.Manager
+	indexer *launcher.Indexer
+	media   *media.Controller
+	spotify *spotify.Client
+	// spotifyMu guards the client because config.set can replace it while RPC handlers
+	// and the media pump are reading it. spotifyID is the client ID it was built with.
+	spotifyMu           sync.Mutex
+	spotifyID           string
+	spotifyCallbackOnce sync.Once
+	// spotifyErrOnce logs the first Spotify read failure. Without it a failing
+	// integration looks exactly like nothing playing, because both resolve to "none".
+	spotifyErrOnce sync.Once
+	// artworkMu guards the album art borrowed for a session GSMTC is reporting.
+	//
+	// GSMTC reports no image, so the island asks the Web API for one. The cache
+	// keeps that to a single request per track rather than one per media poll.
+	artworkMu      sync.Mutex
+	artworkKey     string
+	artworkURL     string
+	artworkFetched time.Time
+	pinStore       *pins.Store
+	audio          *volume.Controller
+	notifications  *notifications.Manager
+	rpcs           *rpc.Server
+	hotkeys        *hotkey.Manager
+	dog            *watchdog.Watchdog
 
 	// quit is signalled by the signal handler, which hands off to the pump thread.
 	// Win32 requires the quit to originate on the pump thread, so the signal handler
@@ -290,13 +323,7 @@ func (d *daemon) setup() error {
 		log.Printf("[NovaBar] Media: %s; transport controls unavailable\n", reason)
 	}
 
-	if d.cfg.Spotify.Enabled && d.cfg.Spotify.ClientID != "" {
-		d.spotify = spotify.New(d.cfg.Spotify.ClientID)
-		log.Println("[NovaBar] Spotify integration enabled")
-		go d.spotifyCallbackServer()
-	} else {
-		d.spotify = nil
-	}
+	d.applySpotifyConfig(d.cfg)
 
 	// Per-application volume. The controller pins its own COM thread, so it is safe to
 	// call from any RPC goroutine. Unavailable audio is not fatal: the dock simply omits
@@ -647,6 +674,37 @@ func (d *daemon) handleWidgetMessage(barName, payload string) {
 		}
 	}
 
+	// The quick-settings panel reports how large its content is. It starts at the
+	// default size and widens when the Spotify queue appears beside the settings.
+	if barName == quickSettingsWidget {
+		var msg struct {
+			Type   string `json:"type"`
+			Width  int32  `json:"width"`
+			Height int32  `json:"height"`
+		}
+		if err := json.Unmarshal([]byte(payload), &msg); err == nil && msg.Type == "quicksettings-size" {
+			d.resizeQuickSettings(msg.Width, msg.Height)
+			return
+		}
+	}
+
+	// The island is drawn inside a bar window, so it cannot grow past the bar's
+	// thickness. The panel it opens is a separate overlay, anchored to the bar it
+	// came from.
+	//
+	// Hand the work back to the pump rather than creating a WebView2 controller from
+	// inside another controller's message callback.
+	var msg struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal([]byte(payload), &msg); err == nil && msg.Type == "toggle-quick-settings" {
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			d.onPumpThread(func() { d.toggleQuickSettings(barName) })
+		}()
+		return
+	}
+
 	log.Printf("[NovaBar] Message from widget on the %s bar: %s", barName, payload)
 }
 
@@ -707,6 +765,7 @@ func (d *daemon) teardown() {
 		d.rpcs.RevokeWidget(d.launcherSecret)
 		d.launcherSecret = ""
 	}
+	d.closeQuickSettings()
 	for name, surface := range d.surfaces {
 		surface.Destroy()
 		delete(d.surfaces, name)
@@ -1366,7 +1425,8 @@ func (d *daemon) toggleSettings() {
 func (d *daemon) spotifyCallbackServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/spotify/callback", func(w http.ResponseWriter, r *http.Request) {
-		if d.spotify == nil {
+		client := d.spotifyClient()
+		if client == nil {
 			http.Error(w, "spotify not configured", http.StatusServiceUnavailable)
 			return
 		}
@@ -1376,7 +1436,7 @@ func (d *daemon) spotifyCallbackServer() {
 			http.Error(w, "missing code", http.StatusBadRequest)
 			return
 		}
-		if err := d.spotify.Exchange(r.Context(), "http://127.0.0.1:8910/spotify/callback", code, state); err != nil {
+		if err := client.Exchange(r.Context(), "http://127.0.0.1:8910/spotify/callback", code, state); err != nil {
 			log.Printf("[NovaBar] Spotify exchange failed: %v\n", err)
 			http.Error(w, "connection failed", http.StatusBadRequest)
 			return
@@ -1454,7 +1514,7 @@ func (d *daemon) status() map[string]any {
 		"windows_tracked": d.trk.Count(),
 		"monitors":        monitorInfo,
 		"launcher_items":  d.indexer.Count(),
-		"media":           d.media.GetCurrentSession(),
+		"media":           d.currentMediaSession(),
 		"audio":           d.audioStatus(),
 		"hotkeys":         d.hotkeys.Registered(),
 		"watchdog_pid":    d.dog.PID(),
@@ -1535,27 +1595,9 @@ func (d *daemon) registerRPCMethods() {
 	registerConfigMethods(r, d)
 
 	r.RegisterMethod(rpc.MethodMediaGet, func(json.RawMessage) (interface{}, error) {
-		if d.cfg.Spotify.Enabled && d.spotify != nil && d.spotify.IsConnected() {
-			if tr, err := d.spotify.CurrentTrack(context.Background()); err == nil {
-				playback := media.StatePaused
-				if tr.IsPlaying {
-					playback = media.StatePlaying
-				}
-				return media.MediaSession{
-					AppID:       "Spotify.exe",
-					Title:       tr.Name,
-					Artist:      strings.Join(tr.Artists, ", "),
-					Album:       tr.Album,
-					Playback:    playback,
-					CanPlay:     true,
-					CanPause:    true,
-					CanNext:     true,
-					CanPrevious: true,
-					Source:      "spotify",
-				}, nil
-			}
-		}
-		return d.media.GetCurrentSession(), nil
+		// One resolver for reads, broadcasts and commands. Picking a source here and
+		// a different one in the pump is what made the island ignore track changes.
+		return d.currentMediaSession(), nil
 	})
 
 	r.RegisterMethod(rpc.MethodMediaCommand, func(params json.RawMessage) (interface{}, error) {
@@ -1573,52 +1615,72 @@ func (d *daemon) registerRPCMethods() {
 			return nil, fmt.Errorf("unknown media command %q", p.Command)
 		}
 
-		if d.cfg.Spotify.Enabled && d.spotify != nil && d.spotify.IsConnected() && (d.cfg.Spotify.Prefer || d.media.GetCurrentSession().Source == "spotify") {
+		// The commands go to whichever source the island is currently showing, so a
+		// button always acts on the track next to it.
+		session := d.currentMediaSession()
+		if session.Source == "spotify" {
+			client := d.spotifyClient()
+			if client == nil {
+				return nil, fmt.Errorf("spotify is no longer configured")
+			}
 			var spErr error
-			switch cmd {
-			case media.CommandPlay, media.CommandTogglePlay:
-				spErr = d.spotify.Play(context.Background())
+			switch resolveSpotifyCommand(cmd, session) {
+			case media.CommandPlay:
+				spErr = client.Play(context.Background())
 			case media.CommandPause:
-				spErr = d.spotify.Pause(context.Background())
+				spErr = client.Pause(context.Background())
 			case media.CommandNext:
-				spErr = d.spotify.Next(context.Background())
+				spErr = client.Next(context.Background())
 			case media.CommandPrevious:
-				spErr = d.spotify.Previous(context.Background())
+				spErr = client.Previous(context.Background())
 			}
-			if spErr == nil {
-				r.Broadcast(rpc.TopicMediaState, d.media.GetCurrentSession())
-				return map[string]interface{}{"ok": true}, nil
+			if spErr != nil {
+				// Do not fall through to GSMTC: it has no session here, and its error
+				// would hide the reason Spotify refused the command.
+				return nil, fmt.Errorf("spotify %s failed: %w", cmd, spErr)
 			}
+			r.Broadcast(rpc.TopicMediaState, d.currentMediaSession())
+			return map[string]interface{}{"ok": true}, nil
 		}
 
 		if err := d.media.Command(cmd); err != nil {
 			return nil, err
 		}
-		r.Broadcast(rpc.TopicMediaState, d.media.GetCurrentSession())
+		r.Broadcast(rpc.TopicMediaState, d.currentMediaSession())
 		return map[string]interface{}{"ok": true}, nil
 	})
 
 	// Spotify Web API methods. They are only available when the integration is
 	// configured; otherwise they report "not connected" rather than failing.
 	r.RegisterMethod(rpc.MethodSpotifyStatus, func(json.RawMessage) (interface{}, error) {
-		if d.spotify == nil {
-			return map[string]interface{}{"connected": false}, nil
+		client := d.spotifyClient()
+		if client == nil {
+			return map[string]interface{}{
+				"configured": false,
+				"connected":  false,
+			}, nil
 		}
-		tr, err := d.spotify.CurrentTrack(context.Background())
+		status := map[string]interface{}{
+			"configured": true,
+			"connected":  client.IsConnected(),
+		}
+		tr, err := client.CurrentTrack(context.Background())
 		if err != nil {
-			return map[string]interface{}{"connected": d.spotify.IsConnected()}, nil
+			// "Nothing playing" is not a login problem, so it is reported separately
+			// rather than making a working account look disconnected.
+			status["error"] = err.Error()
+			return status, nil
 		}
-		return map[string]interface{}{
-			"connected": true,
-			"track":     tr,
-		}, nil
+		status["track"] = tr
+		return status, nil
 	})
 
 	r.RegisterMethod(rpc.MethodSpotifyQueue, func(json.RawMessage) (interface{}, error) {
-		if d.spotify == nil {
+		client := d.spotifyClient()
+		if client == nil {
 			return map[string]interface{}{"tracks": []interface{}{}}, nil
 		}
-		tracks, err := d.spotify.Queue(context.Background())
+		tracks, err := client.Queue(context.Background())
 		if err != nil {
 			return nil, err
 		}
@@ -1626,51 +1688,68 @@ func (d *daemon) registerRPCMethods() {
 	})
 
 	r.RegisterMethod(rpc.MethodSpotifyPlay, func(json.RawMessage) (interface{}, error) {
-		if d.spotify == nil {
+		client := d.spotifyClient()
+		if client == nil {
 			return nil, fmt.Errorf("spotify not configured")
 		}
-		if err := d.spotify.Play(context.Background()); err != nil {
+		if err := client.Play(context.Background()); err != nil {
 			return nil, err
 		}
 		return map[string]interface{}{"ok": true}, nil
 	})
 
 	r.RegisterMethod(rpc.MethodSpotifyPause, func(json.RawMessage) (interface{}, error) {
-		if d.spotify == nil {
+		client := d.spotifyClient()
+		if client == nil {
 			return nil, fmt.Errorf("spotify not configured")
 		}
-		if err := d.spotify.Pause(context.Background()); err != nil {
+		if err := client.Pause(context.Background()); err != nil {
 			return nil, err
 		}
 		return map[string]interface{}{"ok": true}, nil
 	})
 
 	r.RegisterMethod(rpc.MethodSpotifyNext, func(json.RawMessage) (interface{}, error) {
-		if d.spotify == nil {
+		client := d.spotifyClient()
+		if client == nil {
 			return nil, fmt.Errorf("spotify not configured")
 		}
-		if err := d.spotify.Next(context.Background()); err != nil {
+		if err := client.Next(context.Background()); err != nil {
 			return nil, err
 		}
 		return map[string]interface{}{"ok": true}, nil
 	})
 
 	r.RegisterMethod(rpc.MethodSpotifyPrevious, func(json.RawMessage) (interface{}, error) {
-		if d.spotify == nil {
+		client := d.spotifyClient()
+		if client == nil {
 			return nil, fmt.Errorf("spotify not configured")
 		}
-		if err := d.spotify.Previous(context.Background()); err != nil {
+		if err := client.Previous(context.Background()); err != nil {
 			return nil, err
 		}
 		return map[string]interface{}{"ok": true}, nil
 	})
 
 	r.RegisterMethod(rpc.MethodSpotifyConnect, func(json.RawMessage) (interface{}, error) {
-		if d.spotify == nil {
-			return nil, fmt.Errorf("spotify not configured")
+		client := d.spotifyClient()
+		if client == nil {
+			return nil, fmt.Errorf("enable Spotify and set a client ID, then try again")
 		}
-		url := d.spotify.AuthURL("http://127.0.0.1:8910/spotify/callback")
+		d.startSpotifyCallbackServer()
+		url := client.AuthURL("http://127.0.0.1:8910/spotify/callback")
 		return map[string]interface{}{"url": url}, nil
+	})
+
+	r.RegisterMethod(rpc.MethodSpotifyDisconnect, func(json.RawMessage) (interface{}, error) {
+		client := d.spotifyClient()
+		if client != nil {
+			if err := client.Disconnect(); err != nil {
+				return nil, err
+			}
+		}
+		r.Broadcast(rpc.TopicMediaState, d.currentMediaSession())
+		return map[string]interface{}{"ok": true, "connected": false}, nil
 	})
 
 	r.RegisterMethod(rpc.MethodWindowsGet, func(json.RawMessage) (interface{}, error) {
@@ -1964,13 +2043,13 @@ func (d *daemon) mediaPump() {
 	ticker := time.NewTicker(mediaPollInterval)
 	defer ticker.Stop()
 
-	previous := d.media.GetCurrentSession()
+	previous := d.refreshCurrentMedia()
 	for range ticker.C {
-		// A refresh that fails is usually "nothing is playing", and the controller
-		// clears the session in that case, so the comparison below still sees it.
-		_ = d.media.Refresh()
-
-		current := d.media.GetCurrentSession()
+		// Compare the session the UI would actually show, not just GSMTC. With the
+		// Spotify integration enabled the authoritative track can change with no
+		// GSMTC change at all, and polling only GSMTC left the island stuck on the
+		// track it fetched when the page loaded.
+		current := d.refreshCurrentMedia()
 		if !mediaSessionChanged(previous, current) {
 			continue
 		}
@@ -1989,6 +2068,7 @@ func mediaSessionChanged(a, b media.MediaSession) bool {
 		a.Title != b.Title ||
 		a.Artist != b.Artist ||
 		a.Album != b.Album ||
+		a.Artwork != b.Artwork ||
 		a.Playback != b.Playback ||
 		a.CanPlay != b.CanPlay ||
 		a.CanPause != b.CanPause ||

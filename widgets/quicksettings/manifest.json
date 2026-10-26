@@ -1,0 +1,16 @@
+{
+  "id": "novabar.quicksettings",
+  "name": "Quick Settings",
+  "version": "0.1.0",
+  "entry": "index.html",
+  "permissions": [
+    "launcher.use",
+    "windows.read"
+  ],
+  "window": {
+    "kind": "overlay",
+    "transparent": true,
+    "width": 320,
+    "height": 220
+  }
+}

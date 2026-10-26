@@ -33,8 +33,12 @@ without the session token.
 
 ## Built-in widgets
 
-- `bar` — top/bottom bar with Dynamic Island pill, media, clock, date.
+- `bar` — top/bottom bar with Dynamic Island pill, media, clock, date. Clicking the
+  island opens the quick settings panel.
 - `dock` — overlay dock.
 - `launcher` — application search and launch.
+- `quicksettings` — overlay panel opened from the island, with shortcuts into Windows
+  network, Bluetooth, airplane mode and settings, plus the Spotify "Up next" queue when
+  an account is connected.
 - `settings` — in-shell settings overlay.
 - `zones` — workspace zones.

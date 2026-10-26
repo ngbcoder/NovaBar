@@ -62,18 +62,24 @@ func registerConfigMethods(r *rpc.Server, d *daemon) {
 		// for edits made outside the shell; a change made here would otherwise take
 		// effect a moment later, and the UI would look broken in between.
 		d.cfg = next
+		d.applySpotifyConfig(next)
 		d.engine.SetConfig(next)
 		d.engine.DetectMonitors()
 
 		// The bars own WebView2 surfaces, and WebView2 is bound to the thread that
 		// created it, so the work is handed to the message pump thread. Doing it
 		// here would kill the daemon.
+		//
+		// Hotkey registration belongs here too: RegisterHotKey and UnregisterHotKey act
+		// on the calling thread's queue, so re-binding from this RPC goroutine would
+		// leave the pump thread's keys registered while the manager forgot them, which
+		// silently breaks every hotkey until the shell restarts.
 		d.onPumpThread(func() {
 			d.applyBars(next)
 			d.applyTaskbarVisibility(next)
+			d.hotkeys.Register(next)
 		})
 
-		d.hotkeys.Register(next)
 		d.retile()
 		d.publishWindows()
 

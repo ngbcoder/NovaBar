@@ -129,7 +129,7 @@
     }
     .ws:active { transform: scale(0.92); }
 
-    /* ── Dynamic Island (embedded, always centered, Vorssaint glass aesthetic) ─── */
+    /* ── Dynamic Island ─── */
     .center {
       position: absolute;
       left: 50%;
@@ -138,20 +138,14 @@
       z-index: 1;
     }
 
-    @keyframes island-pulse {
-      0%, 100% { opacity: 0.7; transform: scale(1); }
-      50% { opacity: 1; transform: scale(1.15); box-shadow: 0 0 10px var(--accent); }
-    }
-
     .island {
       pointer-events: auto;
       display: flex;
-      flex-direction: column;
       align-items: center;
-      justify-content: flex-start;
-      gap: 0;
+      justify-content: center;
+      gap: 9px;
       height: 32px;
-      padding: 0 14px;
+      padding: 0 13px;
       border-radius: 999px;
       background: rgba(20, 24, 33, 0.72);
       backdrop-filter: blur(24px) saturate(200%);
@@ -159,77 +153,31 @@
         0 8px 32px rgba(0, 0, 0, 0.45),
         inset 0 0 0 1px rgba(255, 255, 255, 0.12),
         0 0 16px rgba(0, 0, 0, 0.25);
-      transition: all 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
-      cursor: default;
+      transition:
+        padding 340ms cubic-bezier(0.34, 1.56, 0.64, 1),
+        background 320ms var(--ease),
+        box-shadow 320ms var(--ease),
+        transform 220ms var(--ease);
+      cursor: pointer;
       overflow: hidden;
     }
+    .island:active {
+      transform: scale(0.97);
+    }
     .island.has-media {
+      padding: 0 9px 0 12px;
       background: rgba(14, 18, 26, 0.86);
       box-shadow:
         0 12px 40px rgba(0, 0, 0, 0.65),
         inset 0 0 0 1px rgba(255, 255, 255, 0.18),
         0 0 24px rgba(46, 230, 168, 0.22);
     }
-    .island.expanded {
-      height: 112px;
-      padding: 8px 14px;
-      border-radius: 20px;
-      background: rgba(12, 16, 24, 0.95);
+    .island.has-media:hover {
+      transform: translateY(-1px);
       box-shadow:
-        0 16px 48px rgba(0, 0, 0, 0.75),
-        inset 0 0 0 1px rgba(255, 255, 255, 0.24),
-        0 0 32px rgba(46, 230, 168, 0.3);
-    }
-
-    .island-main {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      height: 16px;
-      flex: none;
-    }
-
-    .quick-settings-panel {
-      display: none;
-      width: 100%;
-      padding-top: 8px;
-      margin-top: 8px;
-      border-top: 1px solid rgba(255, 255, 255, 0.1);
-      opacity: 0;
-      transition: opacity 200ms ease;
-    }
-    .island.expanded .quick-settings-panel {
-      display: block;
-      opacity: 1;
-    }
-    .qs-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 6px;
-    }
-    .qs-btn {
-      pointer-events: auto;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 10px;
-      border: none;
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text);
-      font: inherit;
-      font-size: 11.5px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background 140ms var(--ease), transform 100ms var(--ease);
-    }
-    .qs-btn:hover { background: rgba(255, 255, 255, 0.14); }
-    .qs-btn:active { transform: scale(0.96); }
-    .qs-btn.active {
-      background: var(--accent);
-      color: var(--accent-ink);
-      font-weight: 600;
+        0 16px 44px rgba(0, 0, 0, 0.7),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+        0 0 30px rgba(46, 230, 168, 0.28);
     }
 
     .island-clock {
@@ -256,30 +204,110 @@
       flex: none;
     }
 
-    .media-indicator {
-      width: 5px;
-      height: 5px;
-      border-radius: 50%;
-      background: var(--accent);
-      animation: island-pulse 2s infinite ease-in-out;
-      flex: none;
+    /* Weather segment */
+    .weather {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .weather[hidden] { display: none; }
+    .weather-temp {
+      font-variant-numeric: tabular-nums;
     }
 
-    /* Media segment — hidden until something plays */
+    /* The now-playing block.
+       The island lives in a 40px bar, so it can only grow sideways. Width is animated
+       through a grid track: 0fr -> 1fr is the one way CSS can move between "nothing"
+       and "exactly as wide as the content" without measuring it in script. */
+    .media-slot {
+      display: grid;
+      grid-template-columns: 0fr;
+      min-width: 0;
+      opacity: 0;
+      transform: translateX(-5px);
+      visibility: hidden;
+      transition:
+        grid-template-columns 360ms cubic-bezier(0.34, 1.56, 0.64, 1),
+        opacity 170ms var(--ease),
+        transform 360ms cubic-bezier(0.34, 1.56, 0.64, 1),
+        visibility 0s linear 380ms;
+    }
+    .island.has-media .media-slot {
+      grid-template-columns: 1fr;
+      opacity: 1;
+      transform: none;
+      visibility: visible;
+      transition-delay: 0s;
+    }
+
     .media {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 7px;
       min-width: 0;
-      opacity: 1;
+      overflow: hidden;
     }
     .media[hidden] { display: none; }
 
+    .media-art {
+      position: relative;
+      flex: none;
+      width: 24px;
+      height: 24px;
+      border-radius: 7px;
+      overflow: hidden;
+      background: linear-gradient(145deg, #303a4d 0%, #131820 100%);
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+        0 2px 8px rgba(0, 0, 0, 0.45);
+      opacity: 0;
+      transform: scale(0.55) rotate(-14deg);
+      transition:
+        opacity 200ms var(--ease),
+        transform 420ms cubic-bezier(0.34, 1.8, 0.5, 1);
+    }
+    .island.has-media .media-art {
+      opacity: 1;
+      transform: none;
+      transition-delay: 70ms;
+    }
+    .media-art img {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .media-art.is-empty img { display: none; }
+    .media-art:not(.is-empty) .media-art-fallback { display: none; }
+    .media-art-fallback {
+      position: absolute;
+      inset: 0;
+      margin: auto;
+      width: 13px;
+      height: 13px;
+      fill: rgba(255, 255, 255, 0.42);
+    }
+
     .media-info {
       min-width: 0;
-      max-width: 200px;
+      max-width: 210px;
       text-align: left;
-      line-height: 1.15;
+      line-height: 1.2;
+      opacity: 0;
+      transform: translateX(-6px);
+      transition:
+        opacity 200ms var(--ease),
+        transform 360ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .island.has-media .media-info {
+      opacity: 1;
+      transform: none;
+      transition-delay: 60ms;
     }
     .media-title, .media-artist {
       white-space: nowrap;
@@ -289,21 +317,48 @@
     .media-title { font-size: 12px; font-weight: 600; color: var(--text); }
     .media-artist { font-size: 10.5px; color: var(--dim); }
 
-    /* Transport controls: hidden by default, revealed on hover or click-expand */
     .media-controls {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 3px;
       flex: none;
       opacity: 0;
-      max-width: 0;
-      overflow: hidden;
-      transition: opacity 160ms var(--ease), max-width 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
+      transform: translateX(7px);
+      transition:
+        opacity 190ms var(--ease),
+        transform 340ms cubic-bezier(0.34, 1.56, 0.64, 1);
     }
-    .island:hover .media-controls,
-    .island.expanded .media-controls {
+    .island.has-media .media-controls {
       opacity: 1;
-      max-width: 120px;
+      transform: none;
+      transition-delay: 100ms;
+    }
+
+    /* Three bars rather than a dot: they read as "this is playing" at a glance, and
+       they freeze when the track does. */
+    .media-eq {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 11px;
+      flex: none;
+    }
+    .media-eq i {
+      display: block;
+      width: 2px;
+      height: 4px;
+      border-radius: 1px;
+      background: var(--accent);
+      opacity: 0.85;
+    }
+    .island.is-playing .media-eq i {
+      animation: eq 900ms ease-in-out infinite;
+    }
+    .island.is-playing .media-eq i:nth-child(2) { animation-delay: 140ms; }
+    .island.is-playing .media-eq i:nth-child(3) { animation-delay: 280ms; }
+    @keyframes eq {
+      0%, 100% { height: 3px; }
+      50% { height: 11px; }
     }
 
     .media-btn {
@@ -341,7 +396,6 @@
     }
     #media-toggle:hover { background: #4aefb8; }
 
-    /* Tray */
     .tray {
       margin-left: auto;
       display: flex;
@@ -350,7 +404,6 @@
       z-index: 2;
     }
 
-    /* Offline badge */
     .offline {
       pointer-events: auto;
       display: none;
@@ -374,7 +427,6 @@
     }
     .offline.show { display: inline-flex; }
 
-    /* Focus rings */
     .brand:focus-visible,
     .ws:focus-visible,
     .media-btn:focus-visible {
@@ -383,25 +435,43 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-      * { transition: none !important; }
+      * {
+        transition: none !important;
+        animation: none !important;
+      }
     }
   </style>
 </head>
 <body>
-  <div class="bar">
-    <div class="brand">NovaBar</div>
+<div class="bar">
+  <div class="brand">NovaBar</div>
 
-    <div class="workspaces" id="workspaces"></div>
+  <div class="workspaces" id="workspaces"></div>
 
-    <div class="center">
-      <div class="island" id="island">
-        <span class="island-clock" id="island-clock">--:--:--</span>
-        <span class="island-date" id="island-date"></span>
+  <div class="center">
+    <div class="island" id="island" role="button" tabindex="0"
+         title="Quick settings" aria-label="Open quick settings">
+      <span class="island-clock" id="island-clock">--:--:--</span>
+      <span class="island-date" id="island-date"></span>
 
-        <div class="media" id="media" hidden>
+      <div class="weather" id="weather" hidden>
+        <span class="island-sep"></span>
+        <span class="weather-temp" id="weather-temp">--°</span>
+      </div>
+
+      <div class="media-slot" aria-hidden="true">
+        <div class="media" id="media">
           <span class="island-sep"></span>
-          <span class="media-indicator"></span>
-          <div class="media-info">
+          <span class="media-eq" aria-hidden="true"><i></i><i></i><i></i></span>
+          <div class="media-art is-empty" id="media-art">
+            <svg class="media-art-fallback" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="7.6" cy="17" r="2.7" />
+              <rect x="9.3" y="4.4" width="1.9" height="12.6" rx="0.95" />
+              <path d="M11.2 4.4c2.9 0.2 5.2 1.8 6.1 4l-1.8 0.9c-0.7-1.5-2.3-2.5-4.3-2.7Z" />
+            </svg>
+            <img id="media-art-img" alt="" decoding="async" referrerpolicy="no-referrer">
+          </div>
+          <div class="media-info" id="media-info">
             <div class="media-title" id="media-title"></div>
             <div class="media-artist" id="media-artist"></div>
           </div>
@@ -429,12 +499,13 @@
         </div>
       </div>
     </div>
-
-    <div class="tray">
-      <span class="offline" id="offline">Offline</span>
-    </div>
   </div>
 
-  <script type="module" src="./main.js"></script>
+  <div class="tray">
+    <span class="offline" id="offline">Offline</span>
+  </div>
+</div>
+
+<script type="module" src="./main.js"></script>
 </body>
 </html>

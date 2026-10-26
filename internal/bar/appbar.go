@@ -276,6 +276,88 @@ func (ab *AppBarManager) edgeInsetForMonitor(mon win.RECT, thickness int32) win.
 	return r
 }
 
+// ownsSpace reports whether the work area still excludes the strip this bar owns.
+//
+// The work area is the shell's answer to "where may windows live", so a bar whose
+// strip is back inside it has lost its reservation, whatever the bar itself was told
+// the last time it asked.
+func (ab *AppBarManager) ownsSpace(work win.RECT) bool {
+	ab.mu.Lock()
+	defer ab.mu.Unlock()
+
+	if !ab.registered {
+		return true
+	}
+
+	switch ab.edge {
+	case win.ABE_TOP:
+		return work.Top >= ab.monitorRect.Top+ab.size
+	case win.ABE_BOTTOM:
+		return work.Bottom <= ab.monitorRect.Bottom-ab.size
+	case win.ABE_LEFT:
+		return work.Left >= ab.monitorRect.Left+ab.size
+	case win.ABE_RIGHT:
+		return work.Right <= ab.monitorRect.Right-ab.size
+	default:
+		return true
+	}
+}
+
+// Reclaim re-announces the bar to the shell and re-asserts its position.
+//
+// The shell keeps its list of AppBars in the process that owns the taskbar, and the
+// list does not survive a restart of that process. After explorer restarts, ABM_SETPOS
+// for a window the new shell has never seen is answered with the rectangle it was
+// handed: the bar still reports its space as granted while the desktop is laid out
+// full-screen underneath it, which is exactly how a maximized window ends up with its
+// title bar under the bar.
+//
+// ABM_NEW is the only message that puts the window back on the shell's list, so a lost
+// reservation is repaired by registering again and then re-applying the position.
+// Registering a bar the shell already knows is harmless: ABM_NEW answers false and the
+// SETPOS that follows re-asserts the same rectangle.
+func (ab *AppBarManager) Reclaim() {
+	ab.mu.Lock()
+	defer ab.mu.Unlock()
+
+	if !ab.registered || ab.hwnd == 0 {
+		return
+	}
+
+	var abd win.APPBARDATA
+	abd.CbSize = uint32(unsafe.Sizeof(abd))
+	abd.HWnd = ab.hwnd
+	abd.UCallbackMessage = WM_APPBAR_NOTIFY
+
+	if win.SHAppBarMessage(win.ABM_NEW, &abd) != 0 {
+		log.Printf("[NovaBar AppBar] %s bar was not on the shell's list (the shell restarted or "+
+			"forgot it); re-registered and re-applying its position\n", ab.name)
+	}
+
+	abd.LParam = win.ABS_ALWAYSONTOP
+	win.SHAppBarMessage(win.ABM_SETSTATE, &abd)
+	abd.LParam = 0
+
+	ab.updatePositionLocked()
+
+	work, _ := win.PrimaryWorkAreaRect()
+	thickness := ab.grantedRect.Height()
+	if ab.isVertical() {
+		thickness = ab.grantedRect.Width()
+	}
+	log.Printf("[NovaBar AppBar] Reclaimed %s bar on monitor (%d,%d): granted %d, "+
+		"work area (%d,%d)-(%d,%d)\n",
+		ab.name, ab.monitorRect.Left, ab.monitorRect.Top, thickness,
+		work.Left, work.Top, work.Right, work.Bottom)
+}
+
+// claimDue reports whether the bar may try to reclaim its space again, and records the
+// attempt when it may.
+//
+// The guard runs every couple of seconds, so an unthrottled repair would hammer the
+// shell: every attempt makes it lay the desktop out again. The clock is started by an
+// attempt, not by a healthy check, so the first time the space goes missing the repair
+// is immediate and only repeated failures are spaced out.
 func (ab *AppBarManager) claimDue() bool {
 	ab.mu.Lock()
 	defer ab.mu.Unlock()
@@ -287,13 +369,8 @@ func (ab *AppBarManager) claimDue() bool {
 	return true
 }
 
-func (ab *AppBarManager) noteClaimed() {
-	ab.mu.Lock()
-	defer ab.mu.Unlock()
-	ab.lastClaim = time.Now()
-}
-
-const claimCooldown = 30 * time.Second
+// claimCooldown is how long to wait before retrying a reclaim that did not take.
+const claimCooldown = 10 * time.Second
 
 func (ab *AppBarManager) SetScope(scope string) {}
 
