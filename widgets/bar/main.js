@@ -10,8 +10,9 @@ const boot = window.NOVABAR;
 
 const el = {
   workspaces: document.getElementById('workspaces'),
-  title: document.getElementById('window-title'),
-  clock: document.getElementById('clock'),
+  island: document.getElementById('island'),
+  islandClock: document.getElementById('island-clock'),
+  islandDate: document.getElementById('island-date'),
   offline: document.getElementById('offline'),
   media: document.getElementById('media'),
   mediaTitle: document.getElementById('media-title'),
@@ -30,8 +31,10 @@ const sdk = new NovaBarSDK({
 /** Workspaces currently known to the daemon, so buttons can be rebuilt without flicker. */
 let knownWorkspaces = [];
 
-/** Handle of the focused window, used to label the centre of the bar. */
-let focusedHwnd = 0;
+/** Content toggles, driven by the island section of the config. */
+let showMedia = true;
+let showClock = true;
+let showDate = true;
 
 function setOffline(offline) {
   el.offline.classList.toggle('show', offline);
@@ -71,37 +74,22 @@ async function switchWorkspace(id) {
   }
 }
 
-function renderWindows(windows) {
-  const focused = windows.find((w) => w.hwnd === focusedHwnd);
-  if (focused?.title) {
-    el.title.textContent = focused.title;
+function renderMedia(session) {
+  if (!showMedia) {
+    el.media.hidden = true;
+    el.island.classList.remove('has-media');
     return;
   }
-  // No specific window focused: show the newest one so the bar is not just blank.
-  const recent = windows[windows.length - 1];
-  el.title.textContent = recent?.title || 'NovaBar';
-}
-
-function renderMedia(session) {
-  const hasMedia = session && session.source === 'gsmtc' && session.title;
+  const hasMedia = Boolean(session && session.source === 'gsmtc' && session.title);
   el.media.hidden = !hasMedia;
+  el.island.classList.toggle('has-media', hasMedia);
   if (!hasMedia) return;
 
   el.mediaTitle.textContent = session.title;
   el.mediaArtist.textContent = session.artist || '';
-  // The icon is swapped rather than the character, because the drawn icons can be
-  // centred exactly and the font's glyphs cannot.
   el.mediaToggle.classList.toggle('is-playing', session.playback === 'playing');
   el.mediaNext.disabled = !session.can_next;
   el.mediaPrev.disabled = !session.can_previous;
-}
-
-function renderClock() {
-  el.clock.textContent = new Date().toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
 }
 
 function mediaCommand(command) {
@@ -110,11 +98,58 @@ function mediaCommand(command) {
   });
 }
 
+async function refreshMedia() {
+  try {
+    const session = await sdk.call('media.get');
+    renderMedia(session);
+  } catch (err) {
+    console.warn('media.get failed', err);
+  }
+}
+
+async function loadConfig() {
+  try {
+    const cfg = await sdk.call('config.get');
+    const island = cfg?.island || {};
+    showMedia = island.show_media !== false;
+    showClock = island.show_clock !== false;
+    showDate = island.show_date !== false;
+  } catch (err) {
+    console.warn('config.get failed', err);
+  }
+  renderClock();
+}
+
+function renderClock() {
+  const now = new Date();
+  el.islandClock.textContent = showClock
+    ? now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '';
+  el.islandClock.style.display = showClock ? '' : 'none';
+  el.islandDate.textContent = showDate
+    ? now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+    : '';
+  el.islandDate.style.display = showDate ? '' : 'none';
+}
+
 function wireControls() {
-  el.mediaToggle.addEventListener('click', () => mediaCommand('toggle'));
-  el.mediaNext.addEventListener('click', () => mediaCommand('next'));
-  el.mediaPrev.addEventListener('click', () => mediaCommand('previous'));
-  el.title.style.pointerEvents = 'auto';
+  el.mediaToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    mediaCommand('toggle');
+  });
+  el.mediaNext.addEventListener('click', (e) => {
+    e.stopPropagation();
+    mediaCommand('next');
+  });
+  el.mediaPrev.addEventListener('click', (e) => {
+    e.stopPropagation();
+    mediaCommand('previous');
+  });
+
+  // Click the island pill to toggle expanded state (reveals transport controls).
+  el.island.addEventListener('click', () => {
+    el.island.classList.toggle('expanded');
+  });
 }
 
 async function refreshWorkspaces() {
@@ -124,25 +159,6 @@ async function refreshWorkspaces() {
     renderWorkspaces(knownWorkspaces);
   } catch (err) {
     console.error('workspace.get failed', err);
-  }
-}
-
-async function refreshWindows() {
-  try {
-    const windows = await sdk.call('windows.get');
-    renderWindows(windows || []);
-  } catch (err) {
-    console.error('windows.get failed', err);
-  }
-}
-
-async function refreshMedia() {
-  try {
-    const session = await sdk.call('media.get');
-    renderMedia(session);
-  } catch (err) {
-    // Media is optional; a failure here must not break the bar.
-    console.warn('media.get failed', err);
   }
 }
 
@@ -170,11 +186,12 @@ async function main() {
     return;
   }
 
-  sdk.subscribe('windows.updated', renderWindows);
+  await loadConfig();
+
   sdk.subscribe('workspace.changed', (state) => renderWorkspaces(state.workspaces || []));
   sdk.subscribe('media.state', renderMedia);
 
-  await Promise.all([refreshWorkspaces(), refreshWindows(), refreshMedia()]);
+  await Promise.all([refreshWorkspaces(), refreshMedia()]);
 }
 
 main();

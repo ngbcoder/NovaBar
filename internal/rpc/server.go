@@ -43,6 +43,14 @@ const (
 	MethodVolumeSet       = "volume.set"
 	MethodVolumeMute      = "volume.mute"
 
+	MethodSpotifyStatus   = "spotify.status"
+	MethodSpotifyQueue    = "spotify.queue"
+	MethodSpotifyPlay     = "spotify.play"
+	MethodSpotifyPause    = "spotify.pause"
+	MethodSpotifyNext     = "spotify.next"
+	MethodSpotifyPrevious = "spotify.previous"
+	MethodSpotifyConnect  = "spotify.connect"
+
 	TopicWindowsUpdated  = "windows.updated"
 	TopicWorkspaceChange = "workspace.changed"
 	TopicMediaState      = "media.state"

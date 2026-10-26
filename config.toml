@@ -49,3 +49,16 @@ action = 'ignore'
 enabled = true
 size = 56
 bottom_margin = 0
+
+[island]
+enabled = true
+width = 360
+height = 56
+show_media = true
+show_clock = true
+show_date = true
+
+[spotify]
+enabled = false
+client_id = ""
+prefer = false
