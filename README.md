@@ -279,7 +279,7 @@ away on the board.
 | M7 — Per-app volume | Done | `audio`, `win32` |
 | M8 — Keyboard window management | Done | `core`, `power-user`, `ui` |
 | M9 — Multi-monitor correctness | Done | `win32`, `multi-monitor` |
-| M10 — HiDPI and per-monitor scaling | Planned | `multi-monitor`, `accessibility`, `ui` |
+| M10 — HiDPI and per-monitor scaling | Done | `multi-monitor`, `accessibility`, `ui` |
 | M11 — Accessibility | Planned | `accessibility`, `ui` |
 | M12 — GSMTC media reads | Done | `media`, `winrt`, `win32` |
 | M13 — App menu: grid, jump lists, recent files | Planned | `shell`, `ui` |

@@ -147,6 +147,9 @@ type daemon struct {
 
 // Run starts the daemon and pumps messages until quit.
 func Run() {
+	// Enable Per-Monitor DPI awareness V2 for crisp rendering across mixed-DPI displays.
+	win.EnablePerMonitorDpiAwareness()
+
 	// The message pump must own its thread for the life of the process. Hooks, hotkeys
 	// and the AppBar all deliver to this thread.
 	runtime.LockOSThread()
