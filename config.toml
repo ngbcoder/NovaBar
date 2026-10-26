@@ -94,6 +94,6 @@ show_clock = true
 show_date = true
 
 [spotify]
-enabled = false
-client_id = ''
+enabled = true
+client_id = 'fe5206243f024b988c2a7626c45b6e28'
 prefer = false

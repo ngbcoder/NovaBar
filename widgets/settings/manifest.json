@@ -5,7 +5,8 @@
   "entry": "index.html",
   "permissions": [
     "config.read",
-    "config.write"
+    "config.write",
+    "media.control"
   ],
   "window": {
     "kind": "overlay",

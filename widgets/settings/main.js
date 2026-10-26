@@ -216,6 +216,25 @@ function render() {
         wrap.className = 'control';
         wrap.appendChild(controlFor(field));
 
+        if (field.path === 'spotify.client_id' && values[field.path]) {
+            const connectBtn = document.createElement('button');
+            connectBtn.className = 'hotkey';
+            connectBtn.style.marginLeft = '10px';
+            connectBtn.textContent = 'Connect';
+            connectBtn.addEventListener('click', async () => {
+                try {
+                    const res = await sdk.call('spotify.connect');
+                    if (res && res.url) {
+                        window.open(res.url, '_blank');
+                        showToast('Opening Spotify login in browser...');
+                    }
+                } catch (err) {
+                    showToast(err.message || 'Could not connect Spotify', true);
+                }
+            });
+            wrap.appendChild(connectBtn);
+        }
+
         row.append(text, wrap);
         rows.appendChild(row);
     }
