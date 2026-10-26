@@ -67,6 +67,9 @@ function renderWorkspaces(workspaces) {
       // Numbered circular pills matching the target look
       btn.textContent = String(w.id);
       btn.title = `${w.name} – ${w.window_count} window${w.window_count === 1 ? '' : 's'}`;
+      btn.setAttribute('aria-label', `Workspace ${w.id}: ${w.name}, ${w.window_count} window${w.window_count === 1 ? '' : 's'}`);
+      btn.setAttribute('aria-pressed', String(Boolean(w.active)));
+      if (w.active) btn.setAttribute('aria-current', 'true');
       btn.addEventListener('click', () => switchWorkspace(w.id));
       return btn;
     }),
@@ -151,6 +154,7 @@ function renderMedia(session) {
 
   const playing = session.playback === 'playing';
   el.mediaToggle.classList.toggle('is-playing', playing);
+  el.mediaToggle.setAttribute('aria-pressed', String(playing));
   el.island.classList.toggle('is-playing', playing);
   el.mediaNext.disabled = session.can_next === false;
   el.mediaPrev.disabled = session.can_previous === false;

@@ -434,6 +434,16 @@
       outline-offset: 2px;
     }
 
+    @media (forced-colors: active) {
+      .island, .btn, .ws, .media-btn {
+        border: 1px solid ButtonText;
+        background: ButtonFace;
+        color: ButtonText;
+      }
+      .media-btn:hover, .ws:hover, .btn:hover { background: Highlight; color: HighlightText; }
+      .offline { border: 1px solid currentColor; }
+    }
+
     @media (prefers-reduced-motion: reduce) {
       * {
         transition: none !important;
@@ -446,7 +456,7 @@
 <div class="bar">
   <div class="brand">NovaBar</div>
 
-  <div class="workspaces" id="workspaces"></div>
+  <div class="workspaces" id="workspaces" role="group" aria-label="Workspaces"></div>
 
   <div class="center">
     <div class="island" id="island" role="button" tabindex="0"
@@ -454,7 +464,7 @@
       <span class="island-clock" id="island-clock">--:--:--</span>
       <span class="island-date" id="island-date"></span>
 
-      <div class="weather" id="weather" hidden>
+      <div class="weather" id="weather" hidden aria-live="polite">
         <span class="island-sep"></span>
         <span class="weather-temp" id="weather-temp">--°</span>
       </div>
@@ -502,7 +512,7 @@
   </div>
 
   <div class="tray">
-    <span class="offline" id="offline">Offline</span>
+    <span class="offline" id="offline" role="status" aria-live="polite">Offline</span>
   </div>
 </div>
 
