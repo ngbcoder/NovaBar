@@ -40,6 +40,18 @@ Three surfaces are live today:
 The screenshot above shows a two-bar layout with the top bar's Dynamic Island pill in the
 centre: clock and date always visible, media track info when something is playing.
 
+### Top bar
+
+![Top bar](assets/img/screenshot-topbar.png)
+
+The top bar hosts the Dynamic Island pill in its centre and reserves the work area.
+
+### Dock
+
+![Dock](assets/img/screenshot-dock.png)
+
+The dock is an overlay that reserves no work area.
+
 ## Quick links
 
 - [Getting Started](getting-started.md)
