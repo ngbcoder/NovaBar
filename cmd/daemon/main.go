@@ -1536,35 +1536,23 @@ func (d *daemon) registerRPCMethods() {
 
 	r.RegisterMethod(rpc.MethodMediaGet, func(json.RawMessage) (interface{}, error) {
 		if d.cfg.Spotify.Enabled && d.spotify != nil && d.spotify.IsConnected() {
-			if tr, err := d.spotify.CurrentTrack(context.Background()); err == nil && tr.IsPlaying {
+			if tr, err := d.spotify.CurrentTrack(context.Background()); err == nil {
+				playback := media.StatePaused
+				if tr.IsPlaying {
+					playback = media.StatePlaying
+				}
 				return media.MediaSession{
 					AppID:       "Spotify.exe",
 					Title:       tr.Name,
 					Artist:      strings.Join(tr.Artists, ", "),
 					Album:       tr.Album,
-					Playback:    media.StatePlaying,
+					Playback:    playback,
 					CanPlay:     true,
 					CanPause:    true,
 					CanNext:     true,
 					CanPrevious: true,
 					Source:      "spotify",
 				}, nil
-			}
-			if d.cfg.Spotify.Prefer {
-				if tr, err := d.spotify.CurrentTrack(context.Background()); err == nil {
-					return media.MediaSession{
-						AppID:       "Spotify.exe",
-						Title:       tr.Name,
-						Artist:      strings.Join(tr.Artists, ", "),
-						Album:       tr.Album,
-						Playback:    media.StatePlaying,
-						CanPlay:     true,
-						CanPause:    true,
-						CanNext:     true,
-						CanPrevious: true,
-						Source:      "spotify",
-					}, nil
-				}
 			}
 		}
 		return d.media.GetCurrentSession(), nil
