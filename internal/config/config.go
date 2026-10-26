@@ -35,6 +35,37 @@ type Config struct {
 	Keymap  KeymapConfig  `toml:"keymap"`
 	Rules   []RuleConfig  `toml:"rules"`
 	Dock    DockConfig    `toml:"dock"`
+	Island  IslandConfig  `toml:"island"`
+	Spotify SpotifyConfig `toml:"spotify"`
+}
+
+// IslandConfig is the Dynamic Island overlay.
+//
+// It is an overlay rather than an AppBar: it reserves no work area and folds away
+// when there is nothing to say. Its size and which pieces of information it shows
+// are configurable so the user can keep it as small or as informative as they like.
+type IslandConfig struct {
+	// Enabled shows the island.
+	Enabled bool `toml:"enabled"`
+	// Width and Height are the overlay size in pixels.
+	Width  int `toml:"width"`
+	Height int `toml:"height"`
+	// ShowMedia shows the current media track.
+	ShowMedia bool `toml:"show_media"`
+	// ShowClock shows the current time.
+	ShowClock bool `toml:"show_clock"`
+	// ShowDate shows the current date.
+	ShowDate bool `toml:"show_date"`
+}
+
+// SpotifyConfig holds the optional Spotify Web API integration.
+type SpotifyConfig struct {
+	// Enabled turns the integration on.
+	Enabled bool `toml:"enabled"`
+	// ClientID is the Spotify application client id.
+	ClientID string `toml:"client_id"`
+	// Prefer makes the island use Spotify instead of GSMTC when both are available.
+	Prefer bool `toml:"prefer"`
 }
 
 // DockConfig is the floating macOS-style dock.
@@ -287,6 +318,18 @@ func DefaultConfig() Config {
 			Size:         56,
 			BottomMargin: 10,
 		},
+		Island: IslandConfig{
+			Enabled:   false,
+			Width:     360,
+			Height:    56,
+			ShowMedia: true,
+			ShowClock: true,
+			ShowDate:  true,
+		},
+		Spotify: SpotifyConfig{
+			Enabled:  false,
+			Prefer:   false,
+		},
 	}
 }
 
@@ -448,6 +491,23 @@ func Validate(cfg *Config) error {
 	}
 	if cfg.Dock.BottomMargin > 200 {
 		cfg.Dock.BottomMargin = 200
+	}
+
+	// Island bounds are clamped rather than rejected, like the dock.
+	if !cfg.Island.Enabled {
+		// keep size sane even when disabled
+	}
+	if cfg.Island.Width < 200 {
+		cfg.Island.Width = 200
+	}
+	if cfg.Island.Width > 900 {
+		cfg.Island.Width = 900
+	}
+	if cfg.Island.Height < 40 {
+		cfg.Island.Height = 40
+	}
+	if cfg.Island.Height > 200 {
+		cfg.Island.Height = 200
 	}
 
 	for i := range cfg.Rules {

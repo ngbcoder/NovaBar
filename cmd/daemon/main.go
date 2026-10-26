@@ -1,11 +1,13 @@
 package daemon
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -25,6 +27,7 @@ import (
 	"github.com/ngbcoder/NovaBar/internal/overlay"
 	"github.com/ngbcoder/NovaBar/internal/pins"
 	"github.com/ngbcoder/NovaBar/internal/rpc"
+	"github.com/ngbcoder/NovaBar/internal/spotify"
 	"github.com/ngbcoder/NovaBar/internal/tiling"
 	"github.com/ngbcoder/NovaBar/internal/tracker"
 	"github.com/ngbcoder/NovaBar/internal/volume"
@@ -110,6 +113,7 @@ type daemon struct {
 	spaces   *workspace.Manager
 	indexer  *launcher.Indexer
 	media    *media.Controller
+	spotify  *spotify.Client
 	pinStore *pins.Store
 	audio    *volume.Controller
 	rpcs     *rpc.Server
@@ -278,6 +282,14 @@ func (d *daemon) setup() error {
 			reason = "no Windows media session manager available"
 		}
 		log.Printf("[NovaBar] Media: %s; transport controls unavailable\n", reason)
+	}
+
+	if d.cfg.Spotify.Enabled && d.cfg.Spotify.ClientID != "" {
+		d.spotify = spotify.New(d.cfg.Spotify.ClientID)
+		log.Println("[NovaBar] Spotify integration enabled")
+		go d.spotifyCallbackServer()
+	} else {
+		d.spotify = nil
 	}
 
 	// Per-application volume. The controller pins its own COM thread, so it is safe to
@@ -1233,8 +1245,16 @@ func (d *daemon) toggleLauncher() {
 		AnchorX: 0.5,
 		AnchorY: 0.35,
 		OnMessage: func(payload string) {
+			if payload == overlay.DismissMessage {
+				go func() {
+					time.Sleep(10 * time.Millisecond)
+					d.onPumpThread(func() { d.toggleLauncher() })
+				}()
+				return
+			}
 			d.handleWidgetMessage("launcher", payload)
 		},
+		Persistent: true,
 	})
 	if err != nil {
 		d.rpcs.RevokeWidget(secret)
@@ -1309,8 +1329,16 @@ func (d *daemon) toggleSettings() {
 		AnchorX: 0.5,
 		AnchorY: 0.5,
 		OnMessage: func(payload string) {
+			if payload == overlay.DismissMessage {
+				go func() {
+					time.Sleep(10 * time.Millisecond)
+					d.onPumpThread(func() { d.toggleSettings() })
+				}()
+				return
+			}
 			d.handleWidgetMessage("settings", payload)
 		},
+		Persistent: true,
 	})
 	if err != nil {
 		d.rpcs.RevokeWidget(secret)
@@ -1323,6 +1351,39 @@ func (d *daemon) toggleSettings() {
 
 	ov.SetBootstrap(js)
 	ov.Navigate(webview.WidgetURL(d.rpcs.Port(), "settings"))
+}
+
+// spotifyCallbackServer listens for the OAuth redirect and exchanges the code.
+func (d *daemon) spotifyCallbackServer() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/spotify/callback", func(w http.ResponseWriter, r *http.Request) {
+		if d.spotify == nil {
+			http.Error(w, "spotify not configured", http.StatusServiceUnavailable)
+			return
+		}
+		code := r.URL.Query().Get("code")
+		state := r.URL.Query().Get("state")
+		if code == "" {
+			http.Error(w, "missing code", http.StatusBadRequest)
+			return
+		}
+		if err := d.spotify.Exchange(r.Context(), "http://127.0.0.1:8910/spotify/callback", code, state); err != nil {
+			log.Printf("[NovaBar] Spotify exchange failed: %v\n", err)
+			http.Error(w, "connection failed", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<!doctype html><title>Spotify connected</title><p>Spotify connected. You can close this tab.</p>"))
+	})
+
+	server := &http.Server{
+		Addr:    "127.0.0.1:8910",
+		Handler: mux,
+	}
+	log.Println("[NovaBar] Spotify callback listening on http://127.0.0.1:8910/spotify/callback")
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("[NovaBar] Spotify callback server stopped: %v\n", err)
+	}
 }
 
 // performRescue restores the desktop and exits.
@@ -1487,6 +1548,81 @@ func (d *daemon) registerRPCMethods() {
 		}
 		r.Broadcast(rpc.TopicMediaState, d.media.GetCurrentSession())
 		return map[string]interface{}{"ok": true}, nil
+	})
+
+	// Spotify Web API methods. They are only available when the integration is
+	// configured; otherwise they report "not connected" rather than failing.
+	r.RegisterMethod(rpc.MethodSpotifyStatus, func(json.RawMessage) (interface{}, error) {
+		if d.spotify == nil {
+			return map[string]interface{}{"connected": false}, nil
+		}
+		tr, err := d.spotify.CurrentTrack(context.Background())
+		if err != nil {
+			return map[string]interface{}{"connected": d.spotify.IsConnected()}, nil
+		}
+		return map[string]interface{}{
+			"connected": true,
+			"track":     tr,
+		}, nil
+	})
+
+	r.RegisterMethod(rpc.MethodSpotifyQueue, func(json.RawMessage) (interface{}, error) {
+		if d.spotify == nil {
+			return map[string]interface{}{"tracks": []interface{}{}}, nil
+		}
+		tracks, err := d.spotify.Queue(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"tracks": tracks}, nil
+	})
+
+	r.RegisterMethod(rpc.MethodSpotifyPlay, func(json.RawMessage) (interface{}, error) {
+		if d.spotify == nil {
+			return nil, fmt.Errorf("spotify not configured")
+		}
+		if err := d.spotify.Play(context.Background()); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"ok": true}, nil
+	})
+
+	r.RegisterMethod(rpc.MethodSpotifyPause, func(json.RawMessage) (interface{}, error) {
+		if d.spotify == nil {
+			return nil, fmt.Errorf("spotify not configured")
+		}
+		if err := d.spotify.Pause(context.Background()); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"ok": true}, nil
+	})
+
+	r.RegisterMethod(rpc.MethodSpotifyNext, func(json.RawMessage) (interface{}, error) {
+		if d.spotify == nil {
+			return nil, fmt.Errorf("spotify not configured")
+		}
+		if err := d.spotify.Next(context.Background()); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"ok": true}, nil
+	})
+
+	r.RegisterMethod(rpc.MethodSpotifyPrevious, func(json.RawMessage) (interface{}, error) {
+		if d.spotify == nil {
+			return nil, fmt.Errorf("spotify not configured")
+		}
+		if err := d.spotify.Previous(context.Background()); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"ok": true}, nil
+	})
+
+	r.RegisterMethod(rpc.MethodSpotifyConnect, func(json.RawMessage) (interface{}, error) {
+		if d.spotify == nil {
+			return nil, fmt.Errorf("spotify not configured")
+		}
+		url := d.spotify.AuthURL("http://127.0.0.1:8910/spotify/callback")
+		return map[string]interface{}{"url": url}, nil
 	})
 
 	r.RegisterMethod(rpc.MethodWindowsGet, func(json.RawMessage) (interface{}, error) {

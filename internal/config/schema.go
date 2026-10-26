@@ -354,6 +354,93 @@ func Schema() []Field {
 				return nil
 			},
 		},
+		Field{
+			Path:  "island.enabled",
+			Label: "Dynamic Island",
+			Help:  "Show the floating island at the top of the screen.",
+			Type:  TypeToggle,
+			Get:   func(c *Config) any { return c.Island.Enabled },
+			Set: func(c *Config, v any) error {
+				c.Island.Enabled = v.(bool)
+				return nil
+			},
+		},
+		Field{			Path:  "island.width",
+			Label: "Island width",
+			Type:  TypeNumber,
+			Min:   200,
+			Max:   900,
+			Get:   func(c *Config) any { return c.Island.Width },
+			Set: func(c *Config, v any) error {
+				c.Island.Width = v.(int)
+				return nil
+			},
+		},
+		Field{			Path:  "island.height",
+			Label: "Island height",
+			Type:  TypeNumber,
+			Min:   40,
+			Max:   200,
+			Get:   func(c *Config) any { return c.Island.Height },
+			Set: func(c *Config, v any) error {
+				c.Island.Height = v.(int)
+				return nil
+			},
+		},
+		Field{			Path:  "island.show_media",
+			Label: "Island: show media",
+			Type:  TypeToggle,
+			Get:   func(c *Config) any { return c.Island.ShowMedia },
+			Set: func(c *Config, v any) error {
+				c.Island.ShowMedia = v.(bool)
+				return nil
+			},
+		},
+		Field{			Path:  "island.show_clock",
+			Label: "Island: show clock",
+			Type:  TypeToggle,
+			Get:   func(c *Config) any { return c.Island.ShowClock },
+			Set: func(c *Config, v any) error {
+				c.Island.ShowClock = v.(bool)
+				return nil
+			},
+		},
+		Field{			Path:  "island.show_date",
+			Label: "Island: show date",
+			Type:  TypeToggle,
+			Get:   func(c *Config) any { return c.Island.ShowDate },
+			Set: func(c *Config, v any) error {
+				c.Island.ShowDate = v.(bool)
+				return nil
+			},
+		},
+		Field{			Path:  "spotify.enabled",
+			Label: "Spotify integration",
+			Type:  TypeToggle,
+			Get:   func(c *Config) any { return c.Spotify.Enabled },
+			Set: func(c *Config, v any) error {
+				c.Spotify.Enabled = v.(bool)
+				return nil
+			},
+		},
+		Field{			Path:  "spotify.client_id",
+			Label: "Spotify client id",
+			Type:  TypeText,
+			Get:   func(c *Config) any { return c.Spotify.ClientID },
+			Set: func(c *Config, v any) error {
+				c.Spotify.ClientID = strings.TrimSpace(fmt.Sprint(v))
+				return nil
+			},
+		},
+		Field{			Path:  "spotify.prefer",
+			Label: "Prefer Spotify",
+			Type:  TypeToggle,
+			Get:   func(c *Config) any { return c.Spotify.Prefer },
+			Set: func(c *Config, v any) error {
+				c.Spotify.Prefer = v.(bool)
+				return nil
+			},
+		},
 	)
 
 	return fields
