@@ -1,0 +1,47 @@
+site_name: NovaBar
+site_description: A lightweight desktop shell and tiling window manager for Windows 11, written in pure Go.
+site_url: https://ngbcoder.github.io/NovaBar/
+repo_url: https://github.com/ngbcoder/NovaBar
+repo_name: ngbcoder/NovaBar
+edit_uri: edit/feature/dynamic-island-embedded-bar/docs/
+
+theme:
+  name: material
+  logo: assets/img/novabar-256.png
+  favicon: assets/img/novabar-256.png
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: deep orange
+      accent: amber
+    - scheme: slate
+      primary: deep orange
+      accent: amber
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Configuration: configuration.md
+  - Widgets: widgets.md
+  - Safety: safety.md
+  - Architecture: architecture.md
+  - Media (GSMTC): gsmtc-m5-findings.md
+  - WebView2 (M4): webview2-m4-findings.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - tables
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/ngbcoder/NovaBar
