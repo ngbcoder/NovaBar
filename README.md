@@ -279,8 +279,8 @@ away on the board.
 | M7 — Per-app volume | Done | `audio`, `win32` |
 | M8 — Keyboard window management | Done | `core`, `power-user`, `ui` |
 | M9 — Multi-monitor correctness | Done | `win32`, `multi-monitor` |
-| M10 — HiDPI and per-monitor scaling | Done | `multi-monitor`, `accessibility`, `ui` |
-| M11 — Accessibility | Planned | `accessibility`, `ui` |
+| M10 — HiDPI and per-monitor scaling | Planned | `multi-monitor`, `accessibility`, `ui` |
+| M11 — Accessibility | Next | `accessibility`, `ui` |
 | M12 — GSMTC media reads | Done | `media`, `winrt`, `win32` |
 | M13 — App menu: grid, jump lists, recent files | Planned | `shell`, `ui` |
 | M14 — Global file search | Planned | `search`, `ui` |
@@ -290,12 +290,12 @@ away on the board.
 | M18 — Per-app window memory | Planned | `persistence`, `ui` |
 | M19 — Notifications | Done | `shell`, `notifications`, `DynamicIsland` |
 | M20 — Clipboard manager | Planned | `clipboard`, `power-user` |
-| M21 — System mixer panel | Next | `audio`, `ui`, `DynamicIsland` |
+| M21 — System mixer panel | Planned | `audio`, `ui`, `DynamicIsland` |
 | M22 — Screenshot tool | Planned | `power-user`, `ui` |
 | M23 — Persistence and theming | Planned | `persistence`, `ui` |
 | M24 — Plugin API for widgets | Planned | `widgets`, `plugin` |
 | M25 — Files app | Planned | `explorer`, `files` |
-| M26 - Dynamic Island | Partial | `ui`, `widgets`, `power-user`, `media`, `plugin`, `DynamicIsland` |
+| M26 - Dynamic Island | Done | `ui`, `widgets`, `power-user`, `media`, `plugin`, `DynamicIsland` |
 | M27 — Full shell replacement | Option | `explorer`, `windows-shell` |
 | M28 — Spotify Integration | Done | `audio`, `widgets`, `media` |
 | M29 — Installer | Planned | `core`, `ui`, `safety` |
