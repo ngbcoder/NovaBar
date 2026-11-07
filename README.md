@@ -290,7 +290,7 @@ away on the board.
 | M18 — Per-app window memory | Planned | `persistence`, `ui` |
 | M19 — Notifications | Done | `shell`, `notifications`, `DynamicIsland` |
 | M20 — Clipboard manager | Planned | `clipboard`, `power-user` |
-| M21 — System mixer panel | Done | `audio`, `ui`, `DynamicIsland` |
+| M21 — System mixer panel | Planned | `audio`, `ui`, `DynamicIsland` |
 | M22 — Screenshot tool | Planned | `power-user`, `ui` |
 | M23 — Persistence and theming | Planned | `persistence`, `ui` |
 | M24 — Plugin API for widgets | Planned | `widgets`, `plugin` |
