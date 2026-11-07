@@ -6,7 +6,9 @@
   "permissions": [
     "config.read",
     "config.write",
-    "media.control"
+    "media.control",
+    "audio.read",
+    "audio.control"
   ],
   "window": {
     "kind": "overlay",

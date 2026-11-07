@@ -29,9 +29,10 @@
 - [x] End-to-end test with a real Spotify client ID.
 
 ## Phase 3: Interruptibility / priority
-- [ ] Define priority levels (media < notification < user action).
-- [ ] Allow higher-priority items to replace island content temporarily.
-- [ ] Restore previous item after dismissal.
+- [x] Define priority levels (media < notification < user action) in `internal/island`.
+- [x] Allow higher-priority items to replace island content temporarily (`Controller.Present`).
+- [x] Restore previous item after dismissal (`Controller.Dismiss`/`Restore`).
+- [x] Wire the controller into the daemon/bar so notifications and user actions interrupt the media pill.
 
 ## Notes
 - GSMTC already reports `AppID` (source app) and `Source: "gsmtc"`.

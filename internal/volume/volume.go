@@ -333,6 +333,78 @@ func (c *Controller) SetMute(pid uint32, muted bool) error {
 	})
 }
 
+// MasterVolume returns the default render endpoint's master level (0..1).
+func (c *Controller) MasterVolume() (float32, error) {
+	var level float32
+	err := c.do(func() error {
+		ep, err := openEndpointVolume()
+		if err != nil {
+			return err
+		}
+		return ep.GetMasterVolumeLevelScalar(&level)
+	})
+	return level, err
+}
+
+// MasterMuted reports whether the default render endpoint is muted.
+func (c *Controller) MasterMuted() (bool, error) {
+	var muted bool
+	err := c.do(func() error {
+		ep, err := openEndpointVolume()
+		if err != nil {
+			return err
+		}
+		return ep.GetMute(&muted)
+	})
+	return muted, err
+}
+
+// SetMasterVolume sets the default render endpoint's master level.
+func (c *Controller) SetMasterVolume(level float32) error {
+	return c.do(func() error {
+		ep, err := openEndpointVolume()
+		if err != nil {
+			return err
+		}
+		return ep.SetMasterVolumeLevelScalar(clampLevel(level), nil)
+	})
+}
+
+// SetMasterMute mutes or unmutes the default render endpoint.
+func (c *Controller) SetMasterMute(muted bool) error {
+	return c.do(func() error {
+		ep, err := openEndpointVolume()
+		if err != nil {
+			return err
+		}
+		return ep.SetMute(muted, nil)
+	})
+}
+
+// openEndpointVolume opens the IAudioEndpointVolume for the default render endpoint.
+func openEndpointVolume() (*wca.IAudioEndpointVolume, error) {
+	var devEnum *wca.IMMDeviceEnumerator
+	if err := wca.CoCreateInstance(wca.CLSID_MMDeviceEnumerator, 0,
+		wca.CLSCTX_ALL, wca.IID_IMMDeviceEnumerator, &devEnum); err != nil {
+		return nil, fmt.Errorf("cannot reach the audio device enumerator: %w", err)
+	}
+
+	const (
+		eRender  = 0
+		eConsole = 0
+	)
+	var dev *wca.IMMDevice
+	if err := devEnum.GetDefaultAudioEndpoint(eRender, eConsole, &dev); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNoEndpoint, err)
+	}
+
+	var ep *wca.IAudioEndpointVolume
+	if err := dev.Activate(wca.IID_IAudioEndpointVolume, shareModeShared, nil, &ep); err != nil {
+		return nil, fmt.Errorf("cannot open endpoint volume: %w", err)
+	}
+	return ep, nil
+}
+
 // applyToSession runs fn against the session owned by pid.
 func (c *Controller) applyToSession(pid uint32, fn func(*wca.ISimpleAudioVolume) error) error {
 	return c.do(func() error {

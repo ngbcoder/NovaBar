@@ -32,6 +32,7 @@ func registerVolumeMethods(r *rpc.Server, audio *volume.Controller) {
 			"sessions":  []interface{}{},
 			"available": false,
 			"reason":    audio.Reason(),
+			"master":    nil,
 		}, nil
 	}
 
@@ -43,9 +44,19 @@ func registerVolumeMethods(r *rpc.Server, audio *volume.Controller) {
 		if err != nil {
 			return nil, err
 		}
+		master := map[string]interface{}{"available": false}
+		if level, err := audio.MasterVolume(); err == nil {
+			muted, _ := audio.MasterMuted()
+			master = map[string]interface{}{
+				"available": true,
+				"level":     level,
+				"muted":     muted,
+			}
+		}
 		return map[string]interface{}{
 			"sessions":  sessions,
 			"available": true,
+			"master":    master,
 		}, nil
 	})
 
@@ -88,6 +99,50 @@ func registerVolumeMethods(r *rpc.Server, audio *volume.Controller) {
 		}
 		return map[string]interface{}{"ok": true, "pid": p.PID, "muted": p.Muted}, nil
 	})
+
+	r.RegisterMethod(rpc.MethodVolumeMasterGet, func(json.RawMessage) (interface{}, error) {
+		if audio == nil || !audio.Available() {
+			return unavailable()
+		}
+		level, err := audio.MasterVolume()
+		if err != nil {
+			return nil, err
+		}
+		muted, _ := audio.MasterMuted()
+		return map[string]interface{}{"available": true, "level": level, "muted": muted}, nil
+	})
+
+	r.RegisterMethod(rpc.MethodVolumeMasterSet, func(params json.RawMessage) (interface{}, error) {
+		if audio == nil || !audio.Available() {
+			return unavailable()
+		}
+		var p struct {
+			Level float32 `json:"level"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		if err := audio.SetMasterVolume(p.Level); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"ok": true, "level": p.Level}, nil
+	})
+
+	r.RegisterMethod(rpc.MethodVolumeMasterMute, func(params json.RawMessage) (interface{}, error) {
+		if audio == nil || !audio.Available() {
+			return unavailable()
+		}
+		var p struct {
+			Muted bool `json:"muted"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		if err := audio.SetMasterMute(p.Muted); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"ok": true, "muted": p.Muted}, nil
+	})
 }
 
 // audioState remembers the last broadcast payload so only genuine changes are sent.
@@ -119,9 +174,20 @@ func (d *daemon) pollAudio(stop <-chan struct{}) {
 			continue
 		}
 
+		master := map[string]interface{}{"available": false}
+		if level, err := d.audio.MasterVolume(); err == nil {
+			muted, _ := d.audio.MasterMuted()
+			master = map[string]interface{}{
+				"available": true,
+				"level":     level,
+				"muted":     muted,
+			}
+		}
+
 		payload, err := json.Marshal(map[string]interface{}{
 			"sessions":  sessions,
 			"available": true,
+			"master":    master,
 		})
 		if err != nil {
 			continue

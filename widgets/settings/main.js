@@ -12,6 +12,7 @@ const boot = window.NOVABAR;
 const rows = document.getElementById('rows');
 const toast = document.getElementById('toast');
 const note = document.getElementById('note');
+const sound = document.getElementById('sound');
 
 const sdk = new NovaBarSDK({
     port: boot?.port,
@@ -240,6 +241,83 @@ function render() {
     }
 }
 
+function makeSlider(label, level, muted, onLevel, onMute) {
+  const row = document.createElement('div');
+  row.className = 'sound-row';
+
+  const lbl = document.createElement('div');
+  lbl.className = 'sound-label';
+  lbl.textContent = label;
+  row.appendChild(lbl);
+
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = '0';
+  slider.max = '1';
+  slider.step = '0.01';
+  slider.value = String(level ?? 0);
+  slider.addEventListener('input', () => onLevel(Number(slider.value)));
+  row.appendChild(slider);
+
+  const mute = document.createElement('button');
+  mute.className = 'sound-mute';
+  mute.textContent = muted ? '🔇' : '🔊';
+  mute.addEventListener('click', () => onMute(!muted));
+  row.appendChild(mute);
+
+  return row;
+}
+
+async function refreshSound() {
+  if (!sound) return;
+  try {
+    const res = await sdk.call('volume.list');
+    sound.replaceChildren();
+
+    const title = document.createElement('div');
+    title.className = 'sound-title';
+    title.textContent = 'Sound';
+    sound.appendChild(title);
+
+    if (!res || !res.available) {
+      const empty = document.createElement('div');
+      empty.className = 'sound-empty';
+      empty.textContent = res?.reason || 'Audio unavailable';
+      sound.appendChild(empty);
+      return;
+    }
+
+    const master = res.master || {};
+    sound.appendChild(makeSlider(
+      'Master',
+      master.level ?? 1,
+      master.muted ?? false,
+      (level) => sdk.call('volume.master.set', { level }).catch((e) => showToast(e.message || String(e), true)),
+      (muted) => sdk.call('volume.master.mute', { muted }).catch((e) => showToast(e.message || String(e), true)),
+    ));
+
+    for (const s of res.sessions || []) {
+      if (s.system_sounds) continue;
+      const label = s.display_name || s.proc_name || `PID ${s.pid}`;
+      sound.appendChild(makeSlider(
+        label,
+        s.volume ?? 0,
+        s.muted ?? false,
+        (level) => sdk.call('volume.set', { pid: s.pid, level }).catch((e) => showToast(e.message || String(e), true)),
+        (muted) => sdk.call('volume.mute', { pid: s.pid, muted }).catch((e) => showToast(e.message || String(e), true)),
+      ));
+    }
+  } catch (err) {
+    if (sound) {
+      sound.replaceChildren();
+      const empty = document.createElement('div');
+      empty.className = 'sound-empty';
+      empty.textContent = err.message || String(err);
+      sound.appendChild(empty);
+    }
+  }
+}
+
 async function main() {
     if (!boot || !boot.hasBridge) {
         rows.textContent = 'No shell connection.';
@@ -265,6 +343,8 @@ async function main() {
             showNote(`${gated.join(' and ')} can only be changed while the rescue hotkey works.`);
         }
         render();
+        refreshSound();
+        sdk.subscribe('audio.updated', () => refreshSound());
     } catch (err) {
         console.error('could not load the settings schema', err);
         rows.textContent = `Could not load settings: ${err.message || err}`;

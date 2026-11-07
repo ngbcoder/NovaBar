@@ -20,6 +20,8 @@ type Manager struct {
 	notifications []Notification
 	dnd           bool
 	nextID        int
+
+	onAdd func(Notification)
 }
 
 func NewManager() *Manager {
@@ -30,7 +32,6 @@ func NewManager() *Manager {
 
 func (m *Manager) Add(title, body, appName string) Notification {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.nextID++
 	n := Notification{
 		ID:        fmt.Sprintf("notif-%d", m.nextID),
@@ -43,6 +44,12 @@ func (m *Manager) Add(title, body, appName string) Notification {
 	m.notifications = append([]Notification{n}, m.notifications...)
 	if len(m.notifications) > 100 {
 		m.notifications = m.notifications[:100]
+	}
+	cb := m.onAdd
+	m.mu.Unlock()
+
+	if cb != nil {
+		cb(n)
 	}
 	return n
 }
@@ -83,4 +90,12 @@ func (m *Manager) DND() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.dnd
+}
+
+// SetOnAdd registers a callback invoked whenever a notification is added.
+// The callback runs outside the manager's lock.
+func (m *Manager) SetOnAdd(cb func(Notification)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onAdd = cb
 }

@@ -111,6 +111,9 @@ var methodPermissions = map[string]string{
 	MethodVolumeList:           PermAudioRead,
 	MethodVolumeSet:            PermAudioControl,
 	MethodVolumeMute:           PermAudioControl,
+	MethodVolumeMasterGet:      PermAudioRead,
+	MethodVolumeMasterSet:      PermAudioControl,
+	MethodVolumeMasterMute:     PermAudioControl,
 	MethodConfigGet:            PermConfigRead,
 	MethodConfigSchema:         PermConfigRead,
 	MethodConfigSet:            PermConfigWrite,
@@ -119,6 +122,10 @@ var methodPermissions = map[string]string{
 	MethodNotificationsDismiss: PermNotificationsManage,
 	MethodNotificationsClear:   PermNotificationsManage,
 	MethodNotificationsDNDSet:  PermNotificationsManage,
+	MethodIslandGet:            PermWindowsRead,
+	MethodIslandDismiss:        PermWindowsRead,
+	MethodIslandExpand:         PermWindowsRead,
+	MethodSettingsOpen:         PermWindowsRead,
 }
 
 // MethodPermissions returns the methods that widgets may call and what each needs.
@@ -150,6 +157,8 @@ var topicPermissions = map[string]string{
 	TopicPinsChanged: PermLauncherUse,
 	// Audio state is only pushed to widgets already allowed to observe audio.
 	TopicAudioUpdated: PermAudioRead,
+	// Island state is ambient shell content; any widget that can read windows may observe it.
+	TopicIslandState: PermWindowsRead,
 }
 
 // Client has access to this topic.

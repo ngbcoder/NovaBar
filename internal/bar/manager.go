@@ -227,6 +227,27 @@ func (m *Manager) Get(edge uint32) *AppBarManager {
 	return nil
 }
 
+// ByName returns the bar with the given name, or nil.
+func (m *Manager) ByName(name string) *AppBarManager {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, ab := range m.bars {
+		if ab.Name() == name {
+			return ab
+		}
+	}
+	return nil
+}
+
+// All returns a snapshot of the current bars.
+func (m *Manager) All() []*AppBarManager {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*AppBarManager, len(m.bars))
+	copy(out, m.bars)
+	return out
+}
+
 func (m *Manager) Describe() []Info {
 	return m.Infos()
 }

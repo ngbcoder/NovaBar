@@ -20,6 +20,11 @@ const el = {
   mediaToggle: document.getElementById('media-toggle'),
   mediaNext: document.getElementById('media-next'),
   mediaPrev: document.getElementById('media-prev'),
+  islandOverlay: document.getElementById('island-overlay'),
+  islandOverlayTitle: document.getElementById('island-overlay-title'),
+  islandOverlayBody: document.getElementById('island-overlay-body'),
+  islandOverlayDismiss: document.getElementById('island-overlay-dismiss'),
+  volumeBtn: document.getElementById('volume-btn'),
 };
 
 const sdk = new NovaBarSDK({
@@ -35,6 +40,9 @@ let knownWorkspaces = [];
 let showMedia = true;
 let showClock = true;
 let showDate = true;
+
+/** Whether a higher-priority island item is currently replacing media. */
+let islandOverlayActive = false;
 
 function setOffline(offline) {
   el.offline.classList.toggle('show', offline);
@@ -75,9 +83,9 @@ async function switchWorkspace(id) {
 }
 
 function renderMedia(session) {
-  if (!showMedia) {
+  if (!showMedia || islandOverlayActive) {
     el.media.hidden = true;
-    el.island.classList.remove('has-media');
+    if (!islandOverlayActive) el.island.classList.remove('has-media');
     return;
   }
   const hasMedia = Boolean(session && session.title && session.source && session.source !== 'none');
@@ -91,6 +99,37 @@ function renderMedia(session) {
   el.mediaNext.disabled = session.can_next === false;
   el.mediaPrev.disabled = session.can_previous === false;
 }
+
+function renderIslandState(payload) {
+  const item = payload?.item ?? payload;
+  lastIslandItem = item || null;
+  if (!item || item.kind === 'media') {
+    // Fall back to ambient media.
+    islandOverlayActive = false;
+    if (el.islandOverlay) el.islandOverlay.hidden = true;
+    el.island.classList.remove('has-overlay');
+    refreshMedia();
+    return;
+  }
+  islandOverlayActive = true;
+  el.media.hidden = true;
+  el.island.classList.remove('has-media');
+  el.island.classList.add('has-overlay');
+  if (el.islandOverlay) el.islandOverlay.hidden = false;
+  if (el.islandOverlayTitle) el.islandOverlayTitle.textContent = item.title || '';
+  if (el.islandOverlayBody) el.islandOverlayBody.textContent = item.body || '';
+}
+
+function dismissIsland() {
+  const id = (lastIslandItem && lastIslandItem.id) || '';
+  sdk.call('island.dismiss', id ? { id } : {}).then(() => {
+    islandOverlayActive = false;
+    if (el.islandOverlay) el.islandOverlay.hidden = true;
+    refreshMedia();
+  }).catch((err) => console.error('island.dismiss failed', err));
+}
+
+let lastIslandItem = null;
 
 function mediaCommand(command) {
   return sdk.call('media.command', { command }).catch((err) => {
@@ -148,7 +187,32 @@ function wireControls() {
 
   // Click the island pill to toggle expanded state (reveals transport controls).
   el.island.addEventListener('click', () => {
-    el.island.classList.toggle('expanded');
+    const expanded = el.island.classList.toggle('expanded');
+    sdk.call('island.expand', { expanded }).catch((err) => console.error('island.expand failed', err));
+  });
+
+  if (el.islandOverlayDismiss) {
+    el.islandOverlayDismiss.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dismissIsland();
+    });
+  }
+
+  if (el.volumeBtn) {
+    el.volumeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const rect = el.volumeBtn.getBoundingClientRect();
+      const anchorX = (rect.left + rect.width / 2) / window.innerWidth;
+      sdk.call('island.expand', { expanded: true, anchor_x: anchorX }).catch(() => {});
+    });
+  }
+
+  // Collapse the expanded island when clicking elsewhere.
+  document.addEventListener('click', (e) => {
+    if (!el.island.contains(e.target) && el.island.classList.contains('expanded')) {
+      el.island.classList.remove('expanded');
+      sdk.call('island.expand', { expanded: false }).catch(() => {});
+    }
   });
 }
 
@@ -190,8 +254,15 @@ async function main() {
 
   sdk.subscribe('workspace.changed', (state) => renderWorkspaces(state.workspaces || []));
   sdk.subscribe('media.state', renderMedia);
+  sdk.subscribe('island.state', renderIslandState);
 
   await Promise.all([refreshWorkspaces(), refreshMedia()]);
+  try {
+    const st = await sdk.call('island.get');
+    renderIslandState(st);
+  } catch (err) {
+    console.warn('island.get failed', err);
+  }
 }
 
 main();

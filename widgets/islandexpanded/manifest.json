@@ -1,0 +1,19 @@
+{
+  "id": "novabar.islandexpanded",
+  "name": "NovaBar Island Expanded",
+  "version": "0.1.0",
+  "entry": "index.html",
+  "permissions": [
+    "windows.read",
+    "media.control",
+    "config.read",
+    "audio.read",
+    "audio.control"
+  ],
+  "window": {
+    "kind": "overlay",
+    "transparent": true,
+    "width": 400,
+    "height": 200
+  }
+}

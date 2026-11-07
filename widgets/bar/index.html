@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>NovaBar</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons+Round">
   <style>
     :root {
       --bg: rgba(12, 14, 20, 0.78);
@@ -171,14 +172,7 @@
         0 0 24px rgba(46, 230, 168, 0.22);
     }
     .island.expanded {
-      height: 112px;
-      padding: 8px 14px;
-      border-radius: 20px;
       background: rgba(12, 16, 24, 0.95);
-      box-shadow:
-        0 16px 48px rgba(0, 0, 0, 0.75),
-        inset 0 0 0 1px rgba(255, 255, 255, 0.24),
-        0 0 32px rgba(46, 230, 168, 0.3);
     }
 
     .island-main {
@@ -382,6 +376,42 @@
       outline-offset: 2px;
     }
 
+    .island-overlay {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 6px;
+    }
+    .island-overlay-info {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .island-overlay-title {
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 220px;
+    }
+    .island-overlay-body {
+      font-size: 11px;
+      opacity: 0.8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 220px;
+    }
+    .vol-btn {
+      pointer-events: auto;
+      width: 26px; height: 26px; border: none; border-radius: 50%;
+      background: transparent; color: var(--text); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      margin-right: 6px;
+    }
+    .vol-btn .material-icons-round { font-size: 18px; }
+    .vol-btn:hover { background: rgba(255,255,255,0.08); }
     @media (prefers-reduced-motion: reduce) {
       * { transition: none !important; }
     }
@@ -427,10 +457,20 @@
             </button>
           </div>
         </div>
+
+        <div class="island-overlay" id="island-overlay" hidden>
+          <span class="island-sep"></span>
+          <div class="island-overlay-info">
+            <div class="island-overlay-title" id="island-overlay-title"></div>
+            <div class="island-overlay-body" id="island-overlay-body"></div>
+          </div>
+          <button class="media-btn" id="island-overlay-dismiss" title="Dismiss" aria-label="Dismiss">×</button>
+        </div>
       </div>
     </div>
 
     <div class="tray">
+      <button class="vol-btn" id="volume-btn" title="Volume"><span class="material-icons-round">volume_up</span></button>
       <span class="offline" id="offline">Offline</span>
     </div>
   </div>

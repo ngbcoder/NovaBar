@@ -21,6 +21,7 @@ import (
 	"github.com/ngbcoder/NovaBar/internal/bar"
 	"github.com/ngbcoder/NovaBar/internal/config"
 	"github.com/ngbcoder/NovaBar/internal/hotkey"
+	"github.com/ngbcoder/NovaBar/internal/island"
 	"github.com/ngbcoder/NovaBar/internal/launcher"
 	"github.com/ngbcoder/NovaBar/internal/media"
 	"github.com/ngbcoder/NovaBar/internal/notifications"
@@ -105,6 +106,11 @@ type daemon struct {
 
 	// zones is the zone picker waiting for the user to pick a cell, if any.
 	zones *zonePicker
+
+	// islandExpanded is the floating panel shown below the bar when the island is
+	// expanded, nil when closed.
+	islandExpanded       *overlay.Overlay
+	islandExpandedSecret string
 	// zoneOverlay is the picker surface, and zoneSecret its credential.
 	zoneOverlay *overlay.Overlay
 	zoneSecret  string
@@ -115,6 +121,7 @@ type daemon struct {
 	indexer  *launcher.Indexer
 	media    *media.Controller
 	spotify  *spotify.Client
+	island   *island.Controller
 	pinStore *pins.Store
 	audio         *volume.Controller
 	notifications *notifications.Manager
@@ -168,6 +175,7 @@ func Run() {
 		trk:           tracker.NewWindowTracker(),
 		spaces:        workspace.NewManager(),
 		notifications: notifications.NewManager(),
+		island:        island.New(),
 		pumpTasks:     make(chan func(), 8),
 	}
 	// Capture the pump thread before anything can signal us, so an early Ctrl+C still
@@ -233,6 +241,15 @@ func (d *daemon) setup() error {
 	}
 	d.cfg = cfg
 
+	if d.notifications != nil && d.island != nil {
+		d.notifications.SetOnAdd(func(n notifications.Notification) {
+			d.onPumpThread(func() {
+				d.presentNotificationItem(n)
+				d.broadcastIsland()
+			})
+		})
+	}
+
 	firstRun := cfg.General.FirstRun
 	if firstRun {
 		// Clear the flag in memory now so nothing else acts on it; the modal itself
@@ -282,6 +299,9 @@ func (d *daemon) setup() error {
 	}()
 
 	d.media = media.NewController()
+	if d.island != nil {
+		d.presentMediaItem()
+	}
 	if !d.media.Attached() {
 		reason := d.media.Reason()
 		if reason == "" {
@@ -1215,6 +1235,13 @@ func (d *daemon) toggleLauncher() {
 	if d.launcher != nil {
 		d.launcher.Close()
 		d.launcher = nil
+		if d.island != nil {
+			d.island.Dismiss("launcher")
+			if d.island.Current() == nil {
+				d.presentMediaItem()
+			}
+			d.broadcastIsland()
+		}
 		return
 	}
 	if d.widgets == "" {
@@ -1272,6 +1299,16 @@ func (d *daemon) toggleLauncher() {
 	d.launcher = ov
 	d.launcherSecret = secret
 
+	if d.island != nil {
+		d.island.Present(island.Item{
+			ID:       "launcher",
+			Priority: island.PriorityUserAction,
+			Kind:     island.KindUserAction,
+			Title:    "Launcher",
+		})
+		d.broadcastIsland()
+	}
+
 	ov.SetBootstrap(js)
 	ov.Navigate(webview.WidgetURL(d.rpcs.Port(), "launcher"))
 	d.focusWindow(ov.HWND())
@@ -1289,6 +1326,13 @@ func (d *daemon) toggleSettings() {
 			d.rpcs.RevokeWidget(d.settingsSecret)
 		}
 		d.settingsSecret = ""
+		if d.island != nil {
+			d.island.Dismiss("settings")
+			if d.island.Current() == nil {
+				d.presentMediaItem()
+			}
+			d.broadcastIsland()
+		}
 		return
 	}
 
@@ -1356,6 +1400,16 @@ func (d *daemon) toggleSettings() {
 
 	d.settings = ov
 	d.settingsSecret = secret
+
+	if d.island != nil {
+		d.island.Present(island.Item{
+			ID:       "settings",
+			Priority: island.PriorityUserAction,
+			Kind:     island.KindUserAction,
+			Title:    "Settings",
+		})
+		d.broadcastIsland()
+	}
 
 	ov.SetBootstrap(js)
 	ov.Navigate(webview.WidgetURL(d.rpcs.Port(), "settings"))
@@ -1741,6 +1795,7 @@ func (d *daemon) registerRPCMethods() {
 	})
 
 	d.registerNotificationMethods()
+	d.registerIslandMethods()
 }
 
 // parseHWND extracts a window handle from a params object accepting "hwnd" as either a
@@ -1976,6 +2031,8 @@ func (d *daemon) mediaPump() {
 		}
 		previous = current
 		d.rpcs.Broadcast(rpc.TopicMediaState, current)
+		d.presentMediaItem()
+		d.broadcastIsland()
 	}
 }
 

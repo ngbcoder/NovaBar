@@ -41,7 +41,10 @@ const (
 	MethodPinsMove        = "pins.move"
 	MethodVolumeList      = "volume.list"
 	MethodVolumeSet       = "volume.set"
-	MethodVolumeMute      = "volume.mute"
+	MethodVolumeMute       = "volume.mute"
+	MethodVolumeMasterGet  = "volume.master.get"
+	MethodVolumeMasterSet  = "volume.master.set"
+	MethodVolumeMasterMute = "volume.master.mute"
 
 	MethodSpotifyStatus   = "spotify.status"
 	MethodSpotifyQueue    = "spotify.queue"
@@ -56,6 +59,11 @@ const (
 	MethodNotificationsClear   = "notifications.clear"
 	MethodNotificationsDNDSet  = "notifications.dnd.set"
 
+	MethodIslandGet     = "island.get"
+	MethodIslandDismiss = "island.dismiss"
+	MethodIslandExpand  = "island.expand"
+	MethodSettingsOpen  = "settings.open"
+
 	TopicWindowsUpdated        = "windows.updated"
 	TopicWorkspaceChange       = "workspace.changed"
 	TopicMediaState            = "media.state"
@@ -63,6 +71,7 @@ const (
 	TopicPinsChanged           = "pins.changed"
 	TopicAudioUpdated          = "audio.updated"
 	TopicNotificationsUpdated  = "notifications.updated"
+	TopicIslandState           = "island.state"
 )
 
 // ipcFileName is the descriptor written to %APPDATA%\NovaBar\ so that shellctl and
